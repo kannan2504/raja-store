@@ -15,7 +15,9 @@ describe('secure order creation', () => {
     const input = createOrderSchema.parse({ items: [{ productId: 'prod_brass_dabba', quantity: 2, price: 1, total: 2 }], customer: validCustomer, payment: { method: 'cod' }, paymentStatus: 'paid', orderStatus: 'delivered' })
     const order = await service.createOrder(input, 'price-tamper-test')
     expect(order.pricing.subtotal).toBe(1798)
-    expect(order.pricing.total).toBe(1848)
+    // subtotal 1798 >= 300 → free delivery
+    expect(order.pricing.deliveryCharge).toBe(0)
+    expect(order.pricing.total).toBe(1798)
     expect(order.payment.status).toBe('pending')
     expect(order.orderStatus).toBe('pending')
   })
@@ -46,3 +48,76 @@ describe('secure order creation', () => {
     expect(second).toEqual(first)
   })
 })
+
+/* --------------------------------------------------------------------------
+   Delivery charge business rules
+   - subtotal < 200  → rejected (MINIMUM_ORDER_NOT_MET)
+   - subtotal 200    → delivery = 50, total = 250
+   - subtotal 299    → delivery = 50, total = 349
+   - subtotal 300    → delivery = 0,  total = 300
+   - subtotal > 300  → delivery = 0,  total = subtotal
+   All values are computed server-side; no delivery charge is trusted from
+   the client.
+   -------------------------------------------------------------------------- */
+function makeRepo(price: number, stock = 99): ProductRepository {
+  const products: ServerProduct[] = [{ id: 'prod_test', name: 'Test Product', sku: 'TS-001', price, stock, isActive: true, variants: [] }]
+  return {
+    findByIds: async (ids) => products.filter((p) => ids.includes(p.id)),
+    getCatalogProducts: async () => [],
+    getProductCount: async () => products.length,
+    getRecentProducts: async () => [],
+    getStockSnapshot: async () => ({}),
+    reserveStock: async () => true,
+    releaseStock: async () => undefined,
+  } satisfies ProductRepository
+}
+
+describe('delivery charge calculation', () => {
+  it('rejects subtotal below ₹200 (minimum order not met)', async () => {
+    // price=100, qty=1 → subtotal=100 < 200
+    const svc = new OrderService(makeRepo(100))
+    const input = createOrderSchema.parse({ items: [{ productId: 'prod_test', quantity: 1 }], customer: validCustomer, payment: { method: 'cod' } })
+    await expect(svc.createOrder(input, 'delivery-test-below-min')).rejects.toMatchObject({ code: 'MINIMUM_ORDER_NOT_MET' })
+  })
+
+  it('charges ₹50 delivery when subtotal is exactly ₹200', async () => {
+    // price=200, qty=1 → subtotal=200
+    const svc = new OrderService(makeRepo(200))
+    const input = createOrderSchema.parse({ items: [{ productId: 'prod_test', quantity: 1 }], customer: validCustomer, payment: { method: 'cod' } })
+    const order = await svc.createOrder(input, 'delivery-test-200')
+    expect(order.pricing.subtotal).toBe(200)
+    expect(order.pricing.deliveryCharge).toBe(50)
+    expect(order.pricing.total).toBe(250)
+  })
+
+  it('charges ₹50 delivery when subtotal is ₹299', async () => {
+    // price=299, qty=1 → subtotal=299
+    const svc = new OrderService(makeRepo(299))
+    const input = createOrderSchema.parse({ items: [{ productId: 'prod_test', quantity: 1 }], customer: validCustomer, payment: { method: 'cod' } })
+    const order = await svc.createOrder(input, 'delivery-test-299')
+    expect(order.pricing.subtotal).toBe(299)
+    expect(order.pricing.deliveryCharge).toBe(50)
+    expect(order.pricing.total).toBe(349)
+  })
+
+  it('gives FREE delivery when subtotal is exactly ₹300', async () => {
+    // price=300, qty=1 → subtotal=300
+    const svc = new OrderService(makeRepo(300))
+    const input = createOrderSchema.parse({ items: [{ productId: 'prod_test', quantity: 1 }], customer: validCustomer, payment: { method: 'cod' } })
+    const order = await svc.createOrder(input, 'delivery-test-300')
+    expect(order.pricing.subtotal).toBe(300)
+    expect(order.pricing.deliveryCharge).toBe(0)
+    expect(order.pricing.total).toBe(300)
+  })
+
+  it('gives FREE delivery when subtotal is above ₹300', async () => {
+    // price=500, qty=1 → subtotal=500
+    const svc = new OrderService(makeRepo(500))
+    const input = createOrderSchema.parse({ items: [{ productId: 'prod_test', quantity: 1 }], customer: validCustomer, payment: { method: 'cod' } })
+    const order = await svc.createOrder(input, 'delivery-test-above-300')
+    expect(order.pricing.subtotal).toBe(500)
+    expect(order.pricing.deliveryCharge).toBe(0)
+    expect(order.pricing.total).toBe(500)
+  })
+})
+
