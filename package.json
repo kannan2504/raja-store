@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "server:dev": "tsx server/src/server.ts",
     "server:build": "tsc -p server/tsconfig.json",
+    "server:start": "tsx server/src/server.ts",
     "test:server": "npm exec -- vitest run server/tests",
     "seed": "tsx server/src/seed.ts"
   },
@@ -16,6 +17,7 @@
     "@vitejs/plugin-react": "latest",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
+    "tsx": "^4.23.13",
     "express": "^5.2.1",
     "express-rate-limit": "^8.7.0",
     "helmet": "^8.3.0",
@@ -41,7 +43,6 @@
     "@types/supertest": "^7.2.1",
     "mongodb-memory-server": "^11.2.0",
     "supertest": "^7.2.2",
-    "tsx": "^4.23.13",
     "vitest": "^5.0.0"
   }
 }
