@@ -1,0 +1,10 @@
+node_modules
+dist
+.env
+.env.*
+!.env.example
+server/.env
+server/private/payment-proofs/*
+!server/private/payment-proofs/.gitkeep
+server/private/product-images/*
+!server/private/product-images/.gitkeep
