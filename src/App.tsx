@@ -29,7 +29,7 @@ import { useCart } from './context/CartContext'
 import type { Category, Product, ProductVariant } from './types/product'
 import { formatPrice, getDiscountPercent } from './utils/format'
 import { createOrder, trackOrder, type TrackedOrder } from './services/orderService'
-import { appendMyOrder, getMyOrders } from './services/myOrdersService'
+import { appendMyOrder, getMyOrders, updateMyOrderStatus } from './services/myOrdersService'
 import DevDatabasePage from './DevDatabasePage'
 import AdminPage from './AdminPage'
 import { API_BASE_URL } from './config'
@@ -1992,6 +1992,9 @@ function TrackOrderPage() {
     try {
       const data = await trackOrder(id.trim(), mobile.trim())
       setOrder(data)
+      if (data.status) {
+        updateMyOrderStatus(data.orderId, data.status)
+      }
       sessionStorage.setItem(
         'raja-store-tracking-lookup',
         JSON.stringify({ orderId: id.trim(), phone: mobile.trim() })

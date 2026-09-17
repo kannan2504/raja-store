@@ -68,6 +68,9 @@ export function updateMyOrderStatus(orderId: string, newStatus: string): void {
       o.orderId === orderId ? { ...o, orderStatus: newStatus } : o
     )
     localStorage.setItem(STORAGE_KEY, JSON.stringify(updated))
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new Event('raja-my-orders-updated'))
+    }
   } catch {
     // Ignore storage errors
   }
