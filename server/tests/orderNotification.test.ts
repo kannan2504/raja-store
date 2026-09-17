@@ -1,12 +1,17 @@
 import { describe, expect, it, vi } from 'vitest'
 import {
   AdminOrderNotificationService,
+  DevelopmentWhatsAppProvider,
+  GmailSmtpEmailProvider,
   OrderNotificationFormatter,
 } from '../src/services/orderNotification'
+import { env } from '../src/config/env'
 import type { Order } from '../src/models/orderModel'
 import { InMemoryProductRepository, type ProductRepository } from '../src/repositories/productRepository'
 import { InMemoryOrderRepository } from '../src/repositories/orderRepository'
 import { createOrderSchema, OrderService } from '../src/services/orderService'
+import { makeApp } from '../src/appFactory'
+import supertest from 'supertest'
 
 const order: Order = {
   orderId: 'ORD-2026-000099',
@@ -290,5 +295,82 @@ describe('owner order notifications', () => {
 
     await new Promise((resolve) => setTimeout(resolve, 50))
     expect(sendSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('DevelopmentWhatsAppProvider suppresses customer and order PII in production', async () => {
+    const originalEnv = env.NODE_ENV
+    ;(env as any).NODE_ENV = 'production'
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+
+    try {
+      const provider = new DevelopmentWhatsAppProvider()
+      await provider.send({
+        event: 'ORDER_CREATED',
+        orderId: 'ORD-2026-999999',
+        message: 'CUSTOMER\nName: Secret User\nPhone: 9999999999\nUTR: UTR-SECRET\nAddress: 99 Private Way',
+        recipients: { whatsapp: '9876543210' },
+      })
+
+      // Must not print the message body or PII
+      const output = consoleSpy.mock.calls.map((call) => call.join(' ')).join('\n')
+      expect(output).not.toContain('Secret User')
+      expect(output).not.toContain('9999999999')
+      expect(output).not.toContain('UTR-SECRET')
+      expect(output).not.toContain('99 Private Way')
+      expect(output).toContain('ORD-2026-999999')
+      expect(output).toContain('external provider unconfigured')
+    } finally {
+      ;(env as any).NODE_ENV = originalEnv
+      consoleSpy.mockRestore()
+    }
+  })
+
+  it('DevelopmentWhatsAppProvider safely no-ops in production when WhatsApp recipient is unconfigured', async () => {
+    const originalEnv = env.NODE_ENV
+    ;(env as any).NODE_ENV = 'production'
+    const consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined)
+
+    try {
+      const provider = new DevelopmentWhatsAppProvider()
+      await provider.send({
+        event: 'ORDER_CREATED',
+        orderId: 'ORD-2026-888888',
+        message: 'Sensitive info',
+        recipients: {},
+      })
+
+      expect(consoleSpy).not.toHaveBeenCalled()
+    } finally {
+      ;(env as any).NODE_ENV = originalEnv
+      consoleSpy.mockRestore()
+    }
+  })
+
+  it('GmailSmtpEmailProvider uses IPv4 family: 4 in getSocket', () => {
+    const provider = new GmailSmtpEmailProvider()
+    const transporter = (provider as any).getTransporter()
+    expect(transporter.options.host).toBe('smtp.gmail.com')
+    expect(transporter.options.port).toBe(587)
+    expect(transporter.options.secure).toBe(false)
+    expect(transporter.options.requireTLS).toBe(true)
+    expect(typeof transporter.options.getSocket).toBe('function')
+  })
+
+  it('Express app configures trust proxy 1 and rate limits without X-Forwarded-For error', async () => {
+    const productRepo = new InMemoryProductRepository()
+    const orderRepo = new InMemoryOrderRepository()
+    const app = makeApp(productRepo, orderRepo)
+
+    expect(app.get('trust proxy')).toBe(1)
+
+    // Rate-limited route POST /api/orders with X-Forwarded-For
+    const response = await supertest(app)
+      .post('/api/orders')
+      .set('X-Forwarded-For', '203.0.113.195')
+      .send({})
+
+    // The endpoint will respond with 400 validation error, not 500 ERR_ERL_UNEXPECTED_X_FORWARDED_FOR
+    expect(response.status).toBe(400)
+    expect(response.body.code).not.toBe('ERR_ERL_UNEXPECTED_X_FORWARDED_FOR')
   })
 })

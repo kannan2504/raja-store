@@ -31,6 +31,7 @@ export function makeApp(
   const imageStorage = productImageStorage ?? createProductImageStorage()
 
   application.disable('x-powered-by')
+  application.set('trust proxy', 1)
 
   application.use(helmet())
 

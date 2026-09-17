@@ -2,6 +2,7 @@ import type { Order } from '../models/orderModel'
 import type { ProductRepository } from '../repositories/productRepository'
 import { env } from '../config/env'
 import nodemailer, { type Transporter } from 'nodemailer'
+import net from 'node:net'
 
 export type OrderNotificationEvent = 'ORDER_CREATED'
 
@@ -22,6 +23,13 @@ export interface EmailProvider {
 
 export class DevelopmentWhatsAppProvider implements WhatsAppProvider {
   async send(notification: AdminOrderNotification) {
+    if (env.NODE_ENV === 'production') {
+      if (notification.recipients.whatsapp) {
+        console.log(`[AdminOrderNotification] WhatsApp notification pending for order ${notification.orderId} (external provider unconfigured)`)
+      }
+      return
+    }
+
     console.log(`[DevelopmentWhatsAppProvider] To: ${notification.recipients.whatsapp || '(not configured)'}\n${notification.message}`)
   }
 }
@@ -46,6 +54,18 @@ export class GmailSmtpEmailProvider implements EmailProvider {
         connectionTimeout: 10000,
         greetingTimeout: 5000,
         socketTimeout: 15000,
+        getSocket: (options, callback) => {
+          const socket = net.connect(
+            {
+              host: options.host,
+              port: Number(options.port),
+              family: 4,
+              timeout: options.connectionTimeout,
+            },
+            () => callback(null, { connection: socket }),
+          )
+          socket.once('error', (err) => callback(err))
+        },
       })
     }
     return this.transporter
