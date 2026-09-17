@@ -29,6 +29,7 @@ import { formatPrice, getDiscountPercent } from './utils/format'
 import { createOrder, trackOrder, type TrackedOrder } from './services/orderService'
 import DevDatabasePage from './DevDatabasePage'
 import AdminPage from './AdminPage'
+import { API_BASE_URL } from './config'
 
 type SortOption = 'featured' | 'price-low' | 'price-high' | 'newest' | 'name'
 
@@ -1347,7 +1348,7 @@ function CheckoutPage() {
 
   // Fetch store payment config
   useEffect(() => {
-    fetch(`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000'}/api/payment-config`)
+    fetch(`${API_BASE_URL}/api/payment-config`)
       .then((res) => res.json())
       .then((payload: { payment?: typeof paymentConfig }) => {
         if (payload.payment) setPaymentConfig(payload.payment)

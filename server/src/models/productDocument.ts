@@ -6,7 +6,7 @@ const variantSchema = new Schema({
 
 const productSchema = new Schema({
   productId: { type: String, required: true, unique: true, index: true }, name: { type: String, required: true }, slug: { type: String, required: true, unique: true, index: true }, description: { type: String, required: true }, shortDescription: { type: String, required: true }, sku: { type: String, required: true, unique: true, index: true }, category: { slug: String, name: String }, price: { type: Number, required: true, min: 0 }, compareAtPrice: Number, discount: { type: Number, min: 0 }, stock: { type: Number, required: true, min: 0 }, images: { type: [String], default: [] }, variants: [variantSchema], active: { type: Boolean, default: true, index: true }, rating: Number, isNew: Boolean, isBestSeller: Boolean, tone: String,
-}, { timestamps: true, versionKey: false })
+}, { timestamps: true, versionKey: false, suppressReservedKeysWarning: true })
 
 export type ProductDocument = InferSchemaType<typeof productSchema>
 export const ProductModel = model('Product', productSchema)

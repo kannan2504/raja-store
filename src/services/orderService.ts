@@ -1,4 +1,5 @@
 import type { CartItem } from '../context/CartContext'
+import { API_BASE_URL } from '../config'
 
 type CustomerDetails = {
   fullName: string
@@ -21,8 +22,6 @@ type OrderError = {
   code: string
   message: string
 }
-
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000'
 
 export async function createOrder(customer: CustomerDetails, items: CartItem[], requestKey: string, payment: { method: 'cod' | 'manual_upi'; utrNumber?: string; proof?: File }): Promise<OrderResponse> {
   const body = new FormData()

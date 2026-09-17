@@ -1,4 +1,5 @@
 import type { Category, Product } from '../types/product'
+import { API_BASE_URL } from '../config'
 
 /**
  * Resolve a product image URL to an absolute URL.
@@ -8,12 +9,10 @@ import type { Category, Product } from '../types/product'
  *   frontend origin where the /api/ path does not exist.
  * - Otherwise return it as-is (relative paths such as placeholders).
  */
-const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000'
-
 export function resolveImageUrl(url: string): string {
   if (!url) return url
   if (url.startsWith('http://') || url.startsWith('https://')) return url
-  if (url.startsWith('/api/')) return `${API_BASE}${url}`
+  if (url.startsWith('/api/')) return `${API_BASE_URL}${url}`
   return url
 }
 
@@ -67,7 +66,7 @@ export const demoProducts: Product[] = [
 
 export async function getProducts(): Promise<Product[]> {
   try {
-    const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000'}/api/products`)
+    const response = await fetch(`${API_BASE_URL}/api/products`)
     if (response.ok) {
       const payload = await response.json() as { success: boolean; products?: Product[] }
       if (payload.success && payload.products) return payload.products.map((product) => ({
@@ -80,8 +79,8 @@ export async function getProducts(): Promise<Product[]> {
           : [getProductImage(product)],
       }))
     }
-  } catch { /* Use the local catalog while the API is unavailable. */ }
-  return demoProducts.filter((product) => product.isActive)
+  } catch { /* The storefront shows no stale or fictional stock in production. */ }
+  return import.meta.env.DEV ? demoProducts.filter((product) => product.isActive) : []
 }
 
 export function getProductImage(product: Product, index = 0): string {

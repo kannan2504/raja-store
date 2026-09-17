@@ -1,6 +1,7 @@
 import cors from 'cors'
 import express from 'express'
 import helmet from 'helmet'
+import { randomUUID } from 'node:crypto'
 
 import { errorHandler } from './middleware/errorHandler'
 import { createOrderRoutes } from './routes/createOrderRoutes'
@@ -16,6 +17,8 @@ import {
 } from './controllers/productController'
 import { createProductImageStorage, type ProductImageStorage } from './services/productImageStorage'
 import { createPaymentProofStorage, type PaymentProofStorage } from './services/paymentProofStorage'
+import { isDatabaseConnected } from './config/database'
+import { HttpError } from './utils/httpError'
 
 export function makeApp(
   products: ProductRepository,
@@ -29,19 +32,48 @@ export function makeApp(
 
   const proofStorage = paymentProofStorage ?? createPaymentProofStorage()
   const imageStorage = productImageStorage ?? createProductImageStorage()
+  const allowedOrigins = new Set(
+    [env.FRONTEND_URL, ...env.ADDITIONAL_FRONTEND_URLS].map((origin) => new URL(origin).origin),
+  )
+  const isAllowedOrigin = (origin: string) => {
+    if (allowedOrigins.has(origin)) return true
+    try {
+      const url = new URL(origin)
+      return url.protocol === 'https:' && url.hostname.endsWith('.chatgpt.site')
+    } catch {
+      return false
+    }
+  }
 
   application.disable('x-powered-by')
   application.set('trust proxy', 1)
 
   application.use(helmet())
 
-  application.use(cors({ origin: env.FRONTEND_URL }))
+  application.use((request, response, next) => {
+    const requestId = randomUUID()
+    response.locals.requestId = requestId
+    response.setHeader('X-Request-Id', requestId)
+    next()
+  })
+
+  application.use(cors({
+    origin: (origin, callback) => {
+      if (!origin || isAllowedOrigin(origin)) return callback(null, true)
+      return callback(new HttpError(403, 'CORS_ORIGIN_DENIED', 'Origin is not allowed.'))
+    },
+    methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key', 'X-Request-Id'],
+    exposedHeaders: ['X-Request-Id', 'RateLimit', 'RateLimit-Policy', 'RateLimit-Remaining', 'RateLimit-Reset'],
+    maxAge: 86400,
+  }))
 
   application.use(express.json({ limit: '50kb' }))
 
-  application.get('/api/health', (_request, response) =>
-    response.json({ success: true, status: 'ok' }),
-  )
+  application.get('/api/health', (_request, response) => {
+    const ready = persistenceMode !== 'mongo' || isDatabaseConnected()
+    return response.status(ready ? 200 : 503).json({ success: ready, status: ready ? 'ok' : 'unavailable' })
+  })
 
   application.get('/api/payment-config', getPaymentConfig)
 
@@ -71,6 +103,10 @@ export function makeApp(
   application.use(
     '/api/orders',
     createOrderRoutes(products, orders, proofStorage),
+  )
+
+  application.use((_request, response) =>
+    response.status(404).json({ success: false, code: 'NOT_FOUND', message: 'Not found.' }),
   )
 
   application.use(errorHandler)

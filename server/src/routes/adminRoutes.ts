@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import multer from 'multer'
+import rateLimit from 'express-rate-limit'
 
 import {
   getAdminOrder,
@@ -20,6 +21,15 @@ export function createAdminRoutes(
   productImageStorage: ProductImageStorage = createProductImageStorage(),
 ) {
   const adminRoutes = Router()
+
+  adminRoutes.use(rateLimit({
+    windowMs: 15 * 60 * 1000,
+    limit: 10,
+    skipSuccessfulRequests: true,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: { success: false, code: 'RATE_LIMITED', message: 'Too many failed admin attempts. Please try again later.' },
+  }))
 
   adminRoutes.use(requireAdmin)
 

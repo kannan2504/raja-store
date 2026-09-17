@@ -11,6 +11,8 @@ export function makeAdminProofController(storage: PaymentProofStorage) {
     try {
       const { stream, contentType } = await storage.get(order.payment.proofFileId)
       response.setHeader('Content-Type', contentType)
+      response.setHeader('Cache-Control', 'private, no-store, max-age=0')
+      response.setHeader('Content-Disposition', 'inline')
       stream.on('error', () => {
         if (!response.headersSent) {
           response.status(404).json({ success: false, code: 'PROOF_NOT_FOUND', message: 'Payment proof not found.' })
