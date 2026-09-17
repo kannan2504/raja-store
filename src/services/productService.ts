@@ -1,5 +1,22 @@
 import type { Category, Product } from '../types/product'
 
+/**
+ * Resolve a product image URL to an absolute URL.
+ * - If the value already starts with http:// or https://, return it unchanged.
+ * - If it starts with /api/, prefix it with VITE_API_BASE_URL so it points at
+ *   the backend (e.g. https://raja-store.onrender.com) rather than the Vercel
+ *   frontend origin where the /api/ path does not exist.
+ * - Otherwise return it as-is (relative paths such as placeholders).
+ */
+const API_BASE = import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000'
+
+export function resolveImageUrl(url: string): string {
+  if (!url) return url
+  if (url.startsWith('http://') || url.startsWith('https://')) return url
+  if (url.startsWith('/api/')) return `${API_BASE}${url}`
+  return url
+}
+
 const demoImage = (label: string, width = 900) => `https://placehold.co/${width}x1100/f3eadb/29382a?text=${encodeURIComponent(`${label} demo`)}`
 
 const categories: Category[] = [
@@ -53,14 +70,23 @@ export async function getProducts(): Promise<Product[]> {
     const response = await fetch(`${import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:5000'}/api/products`)
     if (response.ok) {
       const payload = await response.json() as { success: boolean; products?: Product[] }
-      if (payload.success && payload.products) return payload.products.map((product) => product.images.length > 0 ? product : { ...product, images: [getProductImage(product)] })
+      if (payload.success && payload.products) return payload.products.map((product) => ({
+        ...product,
+        // Resolve every image URL to an absolute URL at the fetch boundary so
+        // all downstream components (card, gallery, cart, admin) work without
+        // per-site changes.
+        images: product.images.length > 0
+          ? product.images.map(resolveImageUrl)
+          : [getProductImage(product)],
+      }))
     }
   } catch { /* Use the local catalog while the API is unavailable. */ }
   return demoProducts.filter((product) => product.isActive)
 }
 
-export function getProductImage(product: Product, index = 0) {
-  return product.images[index] ?? `https://placehold.co/900x1100/f3eadb/29382a?text=${encodeURIComponent(`${product.name} demo`)}`
+export function getProductImage(product: Product, index = 0): string {
+  const raw = product.images[index] ?? `https://placehold.co/900x1100/f3eadb/29382a?text=${encodeURIComponent(`${product.name} demo`)}`
+  return resolveImageUrl(raw)
 }
 
 export async function getProductBySlug(slug: string): Promise<Product | undefined> {
