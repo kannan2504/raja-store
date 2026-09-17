@@ -10,12 +10,20 @@ export function makeProductImageController(storage: ProductImageStorage) {
   return (request: Request, response: Response) => {
     response.setHeader('Cross-Origin-Resource-Policy', 'cross-origin')
     try {
-      const reference = Array.isArray(request.params.reference) ? request.params.reference[0] : request.params.reference
+      const reference = Array.isArray(request.params.reference)
+        ? request.params.reference.join('/')
+        : (request.params.reference ?? '')
       const image = storage.get(reference)
       response.setHeader('Cache-Control', 'public, max-age=31536000, immutable')
-      response.setHeader('Content-Type', image.contentType)
-      image.stream.on('error', () => response.status(404).end())
-      image.stream.pipe(response)
+      if ('redirectUrl' in image && image.redirectUrl) {
+        return response.redirect(302, image.redirectUrl)
+      }
+      if ('stream' in image && image.stream && image.contentType) {
+        response.setHeader('Content-Type', image.contentType)
+        image.stream.on('error', () => response.status(404).end())
+        return image.stream.pipe(response)
+      }
+      response.status(404).json({ success: false, code: 'IMAGE_NOT_FOUND', message: 'Product image not found.' })
     } catch {
       response.status(404).json({ success: false, code: 'IMAGE_NOT_FOUND', message: 'Product image not found.' })
     }

@@ -22,6 +22,9 @@ const environmentSchema = z.object({
   ADMIN_NOTIFICATION_WHATSAPP: z.string().optional().or(z.literal('')),
   GMAIL_SMTP_USER: z.string().email().optional().or(z.literal('')),
   GMAIL_SMTP_APP_PASSWORD: z.string().optional().or(z.literal('')),
+  CLOUDINARY_CLOUD_NAME: z.string().optional().default(''),
+  CLOUDINARY_API_KEY: z.string().optional().default(''),
+  CLOUDINARY_API_SECRET: z.string().optional().default(''),
 })
 
 const parsed = environmentSchema.safeParse(process.env)

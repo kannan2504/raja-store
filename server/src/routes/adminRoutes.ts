@@ -12,10 +12,13 @@ import {
 } from '../controllers/adminController'
 import { makeAdminProofController } from '../controllers/adminProofController'
 import { requireAdmin } from '../middleware/adminAuth'
-import { LocalProductImageStorage } from '../services/productImageStorage'
+import { createProductImageStorage, type ProductImageStorage } from '../services/productImageStorage'
 import type { PaymentProofStorage } from '../services/paymentProofStorage'
 
-export function createAdminRoutes(paymentProofStorage: PaymentProofStorage) {
+export function createAdminRoutes(
+  paymentProofStorage: PaymentProofStorage,
+  productImageStorage: ProductImageStorage = createProductImageStorage(),
+) {
   const adminRoutes = Router()
 
   adminRoutes.use(requireAdmin)
@@ -28,9 +31,7 @@ export function createAdminRoutes(paymentProofStorage: PaymentProofStorage) {
     },
   })
 
-  const productImages = makeAdminProductController(
-    new LocalProductImageStorage(),
-  )
+  const productImages = makeAdminProductController(productImageStorage)
 
   adminRoutes.get('/orders', listAdminOrders)
 

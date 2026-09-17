@@ -14,7 +14,7 @@ import {
   makeProductController,
   makeProductImageController,
 } from './controllers/productController'
-import { LocalProductImageStorage } from './services/productImageStorage'
+import { createProductImageStorage, type ProductImageStorage } from './services/productImageStorage'
 import { LocalPrivatePaymentProofStorage } from './services/paymentProofStorage'
 
 export function makeApp(
@@ -22,10 +22,12 @@ export function makeApp(
   orders: OrderRepository,
   databaseConnected = false,
   persistenceMode = 'memory',
+  productImageStorage?: ProductImageStorage,
 ) {
   const application = express()
 
   const paymentProofStorage = new LocalPrivatePaymentProofStorage()
+  const imageStorage = productImageStorage ?? createProductImageStorage()
 
   application.disable('x-powered-by')
 
@@ -44,13 +46,13 @@ export function makeApp(
   application.get('/api/products', makeProductController(products))
 
   application.get(
-    '/api/products/:productId/images/:reference',
-    makeProductImageController(new LocalProductImageStorage()),
+    '/api/products/:productId/images/{*reference}',
+    makeProductImageController(imageStorage),
   )
 
   application.use(
     '/api/admin',
-    createAdminRoutes(paymentProofStorage),
+    createAdminRoutes(paymentProofStorage, imageStorage),
   )
 
   application.use(
