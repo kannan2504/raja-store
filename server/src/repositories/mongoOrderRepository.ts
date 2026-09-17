@@ -10,11 +10,43 @@ function toOrder(document: Record<string, unknown>): Order {
 }
 
 export class MongoOrderRepository implements OrderRepository {
+  private readonly inFlightClaims = new Set<string>()
+
   async findByIdempotencyKey(key: string) { const document = await OrderModel.findOne({ idempotencyKey: key }).lean(); return document ? toOrder(document as Record<string, unknown>) : undefined }
   async findByOrderId(orderId: string) { const document = await OrderModel.findOne({ orderId }).lean(); return document ? toOrder(document as Record<string, unknown>) : undefined }
   async create(order: Order) { const document = await OrderModel.create(order); return toOrder(document.toObject() as Record<string, unknown>) }
   async nextOrderId(year: number) { const counter = await CounterModel.findOneAndUpdate({ _id: `orders-${year}` }, { $inc: { value: 1 } }, { upsert: true, new: true, setDefaultsOnInsert: true }); return `ORD-${year}-${String(counter.value).padStart(6, '0')}` }
   async getOrderCount() { return OrderModel.countDocuments() }
   async getRecentOrders(limit: number): Promise<DevelopmentOrder[]> { const orders = await OrderModel.find().sort({ createdAt: -1 }).limit(limit).lean(); return orders.map((order) => { const customer = (order.customer ?? {}) as { fullName?: string | null; phone?: string | null }; const pricing = (order.pricing ?? {}) as { total?: number | null }; const payment = (order.payment ?? {}) as { method?: string | null; status?: string | null }; const phone = customer.phone ?? ''; return { orderId: order.orderId ?? 'unknown', customerName: customer.fullName ?? 'Unknown customer', maskedPhone: phone.length > 5 ? `${phone.slice(0, 5)}*****` : '*****', total: pricing.total ?? 0, paymentMethod: payment.method ?? 'unknown', paymentStatus: payment.status ?? 'unknown', orderStatus: order.orderStatus ?? 'unknown', createdAt: order.createdAt ? new Date(order.createdAt).toISOString() : new Date(0).toISOString() } }) }
-  async claimOrderCreatedNotification(orderId: string) { const updated = await OrderModel.findOneAndUpdate({ orderId, $or: [{ 'notification.orderCreated.status': { $exists: false } }, { 'notification.orderCreated.status': { $ne: 'sent' } }] }, { $set: { 'notification.orderCreated.status': 'sent', 'notification.orderCreated.event': 'ORDER_CREATED', 'notification.orderCreated.sentAt': new Date() } }, { new: true }); return Boolean(updated) }
+  async claimOrderCreatedNotification(orderId: string) {
+    if (this.inFlightClaims.has(orderId)) return false
+    const order = await OrderModel.findOne({ orderId }).select('notification.orderCreated.status').lean()
+    if (!order || (order as any).notification?.orderCreated?.status === 'sent') return false
+    this.inFlightClaims.add(orderId)
+    return true
+  }
+  async markOrderNotificationSent(orderId: string) {
+    this.inFlightClaims.delete(orderId)
+    await OrderModel.updateOne(
+      { orderId },
+      {
+        $set: {
+          'notification.orderCreated.status': 'sent',
+          'notification.orderCreated.event': 'ORDER_CREATED',
+          'notification.orderCreated.sentAt': new Date(),
+        },
+      },
+    )
+  }
+  async markOrderNotificationFailed(orderId: string) {
+    this.inFlightClaims.delete(orderId)
+    await OrderModel.updateOne(
+      { orderId, 'notification.orderCreated.status': { $ne: 'sent' } },
+      {
+        $set: {
+          'notification.orderCreated.status': 'failed',
+        },
+      },
+    )
+  }
 }

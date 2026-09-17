@@ -1,10 +1,59 @@
-import { describe, expect, it } from 'vitest'
-import { AdminOrderNotificationService, OrderNotificationFormatter } from '../src/services/orderNotification'
+import { describe, expect, it, vi } from 'vitest'
+import {
+  AdminOrderNotificationService,
+  OrderNotificationFormatter,
+} from '../src/services/orderNotification'
 import type { Order } from '../src/models/orderModel'
-import type { ProductRepository } from '../src/repositories/productRepository'
+import { InMemoryProductRepository, type ProductRepository } from '../src/repositories/productRepository'
+import { InMemoryOrderRepository } from '../src/repositories/orderRepository'
+import { createOrderSchema, OrderService } from '../src/services/orderService'
 
-const order: Order = { orderId: 'ORD-2026-000099', idempotencyKey: 'notification-test', trackingTokenHash: 'private', customer: { fullName: 'Test Customer', phone: '9876543210', email: 'test@example.com', address: '12 Market Road', city: 'Chennai', state: 'Tamil Nadu', pincode: '600001' }, items: [{ productId: 'prod_test', productNameSnapshot: 'Test Product', skuSnapshot: 'SKU-TEST', quantity: 2, unitPrice: 500, lineTotal: 1000 }], pricing: { subtotal: 1000, deliveryCharge: 50, discount: 0, total: 1050 }, payment: { method: 'cod', status: 'pending', utrNumber: null, proofFileId: null, verifiedAt: null, verifiedBy: null }, orderStatus: 'pending', createdAt: '2026-09-15T12:00:00.000Z', updatedAt: '2026-09-15T12:00:00.000Z' }
-const products = { findByIds: async () => [], getCatalogProducts: async () => [], getStockSnapshot: async () => ({ 'prod_test:default': 8 }), getProductCount: async () => 0, getRecentProducts: async () => [], reserveStock: async () => true, releaseStock: async () => undefined } as ProductRepository
+const order: Order = {
+  orderId: 'ORD-2026-000099',
+  idempotencyKey: 'notification-test',
+  trackingTokenHash: 'private',
+  customer: {
+    fullName: 'Test Customer',
+    phone: '9876543210',
+    email: 'test@example.com',
+    address: '12 Market Road',
+    city: 'Chennai',
+    state: 'Tamil Nadu',
+    pincode: '600001',
+  },
+  items: [
+    {
+      productId: 'prod_test',
+      productNameSnapshot: 'Test Product',
+      skuSnapshot: 'SKU-TEST',
+      quantity: 2,
+      unitPrice: 500,
+      lineTotal: 1000,
+    },
+  ],
+  pricing: { subtotal: 1000, deliveryCharge: 50, discount: 0, total: 1050 },
+  payment: {
+    method: 'cod',
+    status: 'pending',
+    utrNumber: null,
+    proofFileId: null,
+    verifiedAt: null,
+    verifiedBy: null,
+  },
+  orderStatus: 'pending',
+  createdAt: '2026-09-15T12:00:00.000Z',
+  updatedAt: '2026-09-15T12:00:00.000Z',
+}
+
+const products = {
+  findByIds: async () => [],
+  getCatalogProducts: async () => [],
+  getStockSnapshot: async () => ({ 'prod_test:default': 8 }),
+  getProductCount: async () => 0,
+  getRecentProducts: async () => [],
+  reserveStock: async () => true,
+  releaseStock: async () => undefined,
+} as ProductRepository
 
 describe('owner order notifications', () => {
   it('formats complete totals, items, payment, and remaining stock', async () => {
@@ -19,10 +68,227 @@ describe('owner order notifications', () => {
 
   it('claims ORDER_CREATED only once', async () => {
     let claims = 0
-    const service = new AdminOrderNotificationService(new OrderNotificationFormatter(products), { send: async () => undefined }, { send: async () => undefined })
-    const claim = async () => { claims += 1; return claims === 1 }
+    const service = new AdminOrderNotificationService(
+      new OrderNotificationFormatter(products),
+      { send: async () => undefined },
+      { send: async () => undefined },
+    )
+    const claim = async () => {
+      claims += 1
+      return claims === 1
+    }
     await service.notifyOrderCreated(order, claim)
     await service.notifyOrderCreated(order, claim)
     expect(claims).toBe(2)
+  })
+
+  it('successful order creation does not wait for a slow notification', async () => {
+    const productRepo = new InMemoryProductRepository()
+    const orderRepo = new InMemoryOrderRepository()
+
+    // Mock email provider to simulate a 1000ms delay (e.g. SMTP latency)
+    const slowEmailProvider = {
+      send: vi.fn().mockImplementation(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 1000))
+      }),
+    }
+
+    const notificationService = new AdminOrderNotificationService(
+      new OrderNotificationFormatter(productRepo),
+      { send: async () => undefined },
+      slowEmailProvider,
+    )
+
+    const orderService = new OrderService(productRepo, orderRepo, notificationService)
+    const input = createOrderSchema.parse({
+      items: [{ productId: 'prod_brass_dabba', quantity: 1 }],
+      customer: {
+        fullName: 'Speedy Customer',
+        phone: '9876543210',
+        email: 'speedy@example.com',
+        address: '12 Fast Track',
+        city: 'Chennai',
+        state: 'Tamil Nadu',
+        pincode: '600001',
+      },
+      payment: { method: 'cod' },
+    })
+
+    const start = Date.now()
+    const created = await orderService.createOrder(input, 'fast-checkout-test')
+    const elapsed = Date.now() - start
+
+    // Order creation must return almost immediately (< 300ms) without waiting for the 1000ms email
+    expect(elapsed).toBeLessThan(300)
+    expect(created.orderId).toBeDefined()
+    expect(created.orderStatus).toBe('pending')
+  })
+
+  it('notification failure does not fail an already-created order or release stock', async () => {
+    const productRepo = new InMemoryProductRepository()
+    const orderRepo = new InMemoryOrderRepository()
+
+    const releaseStockSpy = vi.spyOn(productRepo, 'releaseStock')
+
+    // Mock email provider to throw a connection error
+    const failingEmailProvider = {
+      send: vi.fn().mockRejectedValue(new Error('ETIMEDOUT: Connection to smtp.gmail.com:587 failed')),
+    }
+
+    const notificationService = new AdminOrderNotificationService(
+      new OrderNotificationFormatter(productRepo),
+      { send: async () => undefined },
+      failingEmailProvider,
+    )
+
+    const orderService = new OrderService(productRepo, orderRepo, notificationService)
+    const input = createOrderSchema.parse({
+      items: [{ productId: 'prod_brass_dabba', quantity: 1 }],
+      customer: {
+        fullName: 'Resilient Customer',
+        phone: '9876543210',
+        email: 'resilient@example.com',
+        address: '12 Safe St',
+        city: 'Chennai',
+        state: 'Tamil Nadu',
+        pincode: '600001',
+      },
+      payment: { method: 'cod' },
+    })
+
+    // Order placement succeeds despite notification failure
+    const created = await orderService.createOrder(input, 'resilient-order-test')
+    expect(created.orderId).toBeDefined()
+
+    // Wait for background promise tick
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // Stock was NOT released because the order creation succeeded
+    expect(releaseStockSpy).not.toHaveBeenCalled()
+
+    // Status was NOT marked 'sent'; it was marked 'failed'
+    const persisted = await orderRepo.findByOrderId(created.orderId)
+    expect(persisted?.notification?.orderCreated.status).toBe('failed')
+  })
+
+  it('successful email updates notification status to sent', async () => {
+    const productRepo = new InMemoryProductRepository()
+    const orderRepo = new InMemoryOrderRepository()
+
+    const successEmailProvider = {
+      send: vi.fn().mockResolvedValue(undefined),
+    }
+
+    const notificationService = new AdminOrderNotificationService(
+      new OrderNotificationFormatter(productRepo),
+      { send: async () => undefined },
+      successEmailProvider,
+    )
+
+    const orderService = new OrderService(productRepo, orderRepo, notificationService)
+    const input = createOrderSchema.parse({
+      items: [{ productId: 'prod_brass_dabba', quantity: 1 }],
+      customer: {
+        fullName: 'Success Customer',
+        phone: '9876543210',
+        email: 'success@example.com',
+        address: '12 Win St',
+        city: 'Chennai',
+        state: 'Tamil Nadu',
+        pincode: '600001',
+      },
+      payment: { method: 'cod' },
+    })
+
+    const created = await orderService.createOrder(input, 'success-order-test')
+    expect(created.orderId).toBeDefined()
+
+    // Wait for background tick
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const persisted = await orderRepo.findByOrderId(created.orderId)
+    expect(persisted?.notification?.orderCreated.status).toBe('sent')
+    expect(persisted?.notification?.orderCreated.sentAt).toBeDefined()
+  })
+
+  it('duplicate/idempotent requests do not send duplicate successful emails', async () => {
+    const productRepo = new InMemoryProductRepository()
+    const orderRepo = new InMemoryOrderRepository()
+
+    const sendSpy = vi.fn().mockResolvedValue(undefined)
+    const emailProvider = { send: sendSpy }
+
+    const notificationService = new AdminOrderNotificationService(
+      new OrderNotificationFormatter(productRepo),
+      { send: async () => undefined },
+      emailProvider,
+    )
+
+    const orderService = new OrderService(productRepo, orderRepo, notificationService)
+    const input = createOrderSchema.parse({
+      items: [{ productId: 'prod_brass_dabba', quantity: 1 }],
+      customer: {
+        fullName: 'Idempotent Customer',
+        phone: '9876543210',
+        email: 'idempotent@example.com',
+        address: '12 Duplicate Rd',
+        city: 'Chennai',
+        state: 'Tamil Nadu',
+        pincode: '600001',
+      },
+      payment: { method: 'cod' },
+    })
+
+    // First request
+    const first = await orderService.createOrder(input, 'idempotency-key-abc')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(sendSpy).toHaveBeenCalledTimes(1)
+
+    // Second request with same idempotency key
+    const second = await orderService.createOrder(input, 'idempotency-key-abc')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    // Should return identical order and NOT invoke send a second time
+    expect(second.orderId).toBe(first.orderId)
+    expect(sendSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('manual UPI order placement succeeds and initiates notification', async () => {
+    const productRepo = new InMemoryProductRepository()
+    const orderRepo = new InMemoryOrderRepository()
+
+    const sendSpy = vi.fn().mockResolvedValue(undefined)
+    const notificationService = new AdminOrderNotificationService(
+      new OrderNotificationFormatter(productRepo),
+      { send: async () => undefined },
+      { send: sendSpy },
+    )
+
+    const orderService = new OrderService(productRepo, orderRepo, notificationService)
+    const input = createOrderSchema.parse({
+      items: [{ productId: 'prod_brass_dabba', quantity: 1 }],
+      customer: {
+        fullName: 'UPI Customer',
+        phone: '9876543210',
+        email: 'upi@example.com',
+        address: '12 UPI Lane',
+        city: 'Chennai',
+        state: 'Tamil Nadu',
+        pincode: '600001',
+      },
+      payment: {
+        method: 'manual_upi',
+        utrNumber: 'UTR-1234567890',
+        proofFileId: 'cloudinary:raja-store/payment-proofs/sample-123',
+      },
+    })
+
+    const created = await orderService.createOrder(input, 'upi-order-key')
+    expect(created.orderId).toBeDefined()
+    expect(created.payment.method).toBe('manual_upi')
+    expect(created.payment.status).toBe('pending_verification')
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(sendSpy).toHaveBeenCalledTimes(1)
   })
 })

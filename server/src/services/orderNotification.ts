@@ -1,7 +1,7 @@
 import type { Order } from '../models/orderModel'
 import type { ProductRepository } from '../repositories/productRepository'
 import { env } from '../config/env'
-import nodemailer from 'nodemailer'
+import nodemailer, { type Transporter } from 'nodemailer'
 
 export type OrderNotificationEvent = 'ORDER_CREATED'
 
@@ -27,17 +27,39 @@ export class DevelopmentWhatsAppProvider implements WhatsAppProvider {
 }
 
 export class GmailSmtpEmailProvider implements EmailProvider {
-  private readonly transporter = nodemailer.createTransport({
-    service: 'gmail',
-    auth: { user: env.GMAIL_SMTP_USER, pass: env.GMAIL_SMTP_APP_PASSWORD },
-  })
+  private transporter: Transporter | null = null
+
+  private getTransporter(): Transporter {
+    if (!this.transporter) {
+      const user = env.GMAIL_SMTP_USER?.trim()
+      const pass = env.GMAIL_SMTP_APP_PASSWORD?.replace(/\s+/g, '')
+
+      this.transporter = nodemailer.createTransport({
+        host: 'smtp.gmail.com',
+        port: 587,
+        secure: false,
+        requireTLS: true,
+        auth: {
+          user,
+          pass,
+        },
+        connectionTimeout: 10000,
+        greetingTimeout: 5000,
+        socketTimeout: 15000,
+      })
+    }
+    return this.transporter
+  }
 
   async send(notification: AdminOrderNotification) {
-    if (!notification.recipients.email) throw new Error('ADMIN_NOTIFICATION_EMAIL is not configured')
-    if (!env.GMAIL_SMTP_USER || !env.GMAIL_SMTP_APP_PASSWORD) throw new Error('Gmail SMTP credentials are not configured')
-    await this.transporter.sendMail({
-      from: env.GMAIL_SMTP_USER,
-      to: notification.recipients.email,
+    const recipient = notification.recipients.email?.trim()
+    if (!recipient) throw new Error('ADMIN_NOTIFICATION_EMAIL is not configured')
+    const user = env.GMAIL_SMTP_USER?.trim()
+    const pass = env.GMAIL_SMTP_APP_PASSWORD?.replace(/\s+/g, '')
+    if (!user || !pass) throw new Error('Gmail SMTP credentials are not configured')
+    await this.getTransporter().sendMail({
+      from: `"Raja Store" <${user}>`,
+      to: recipient,
       subject: `New Raja Store order ${notification.orderId}`,
       text: notification.message,
     })
@@ -62,14 +84,47 @@ export class OrderNotificationFormatter {
 export class AdminOrderNotificationService {
   constructor(private readonly formatter: OrderNotificationFormatter, private readonly whatsapp: WhatsAppProvider, private readonly email: EmailProvider) {}
 
-  async notifyOrderCreated(order: Order, claim: () => Promise<boolean>) {
+  async notifyOrderCreated(
+    order: Order,
+    claim: () => Promise<boolean>,
+    onSent?: () => Promise<void>,
+    onFailed?: (error: unknown) => Promise<void>,
+  ) {
     const claimed = await claim()
     if (!claimed) return
     try {
-      const notification: AdminOrderNotification = { event: 'ORDER_CREATED', orderId: order.orderId, message: await this.formatter.format(order), recipients: { email: env.ADMIN_NOTIFICATION_EMAIL || undefined, whatsapp: env.ADMIN_NOTIFICATION_WHATSAPP || undefined } }
+      const notification: AdminOrderNotification = {
+        event: 'ORDER_CREATED',
+        orderId: order.orderId,
+        message: await this.formatter.format(order),
+        recipients: {
+          email: env.ADMIN_NOTIFICATION_EMAIL?.trim() || undefined,
+          whatsapp: env.ADMIN_NOTIFICATION_WHATSAPP?.trim() || undefined,
+        },
+      }
       await Promise.all([this.whatsapp.send(notification), this.email.send(notification)])
+      if (onSent) await onSent()
     } catch (error) {
-      console.error(`Admin ORDER_CREATED notification failed for ${order.orderId}`, error)
+      if (onFailed) {
+        try {
+          await onFailed(error)
+        } catch (failError) {
+          console.error(`[AdminOrderNotification] Failed to record failure state for ${order.orderId}:`, failError)
+        }
+      }
+      this.logNotificationFailure(order.orderId, error)
     }
+  }
+
+  private logNotificationFailure(orderId: string, error: unknown) {
+    const err = error as Record<string, unknown> | null
+    const code = err?.code ?? 'UNKNOWN_ERROR'
+    const command = err?.command ?? 'N/A'
+    const responseCode = err?.responseCode ?? 'N/A'
+    const message = error instanceof Error ? error.message : String(error)
+    console.error(
+      `[AdminOrderNotification] ORDER_CREATED notification failed for ${orderId}. ` +
+      `Code: ${code}, Command/Phase: ${command}, ResponseCode: ${responseCode}, Reason: ${message}`,
+    )
   }
 }

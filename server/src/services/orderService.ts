@@ -47,7 +47,12 @@ export class OrderService {
 
   async createOrder(input: CreateOrderInput, idempotencyKey: string): Promise<Order> {
     const previous = await this.orders.findByIdempotencyKey(idempotencyKey)
-    if (previous) { if (this.notifications) await this.notifications.notifyOrderCreated(previous, () => this.orders.claimOrderCreatedNotification(previous.orderId)); return previous }
+    if (previous) {
+      if (this.notifications) {
+        this.dispatchNotification(previous)
+      }
+      return previous
+    }
     if (input.payment.method === 'manual_upi' && (!input.payment.utrNumber || !input.payment.proofFileId)) throw new HttpError(400, 'PAYMENT_PROOF_REQUIRED', 'Please provide your UPI transaction ID and payment screenshot.')
 
     const requestedIds = [...new Set(input.items.map((item) => item.productId))]
@@ -94,7 +99,34 @@ export class OrderService {
       updatedAt: now,
       notification: { orderCreated: { status: 'pending', event: 'ORDER_CREATED', sentAt: null } },
     }
-    try { const created = await this.orders.create(order); if (this.notifications) await this.notifications.notifyOrderCreated(created, () => this.orders.claimOrderCreatedNotification(created.orderId)); return created } catch (_error) { await this.products.releaseStock(input.items); throw new HttpError(503, 'SERVICE_UNAVAILABLE', 'The service is temporarily unavailable. Please try again.') }
+
+    let created: Order
+    try {
+      created = await this.orders.create(order)
+    } catch (_error) {
+      await this.products.releaseStock(input.items)
+      throw new HttpError(503, 'SERVICE_UNAVAILABLE', 'The service is temporarily unavailable. Please try again.')
+    }
+
+    if (this.notifications) {
+      this.dispatchNotification(created)
+    }
+
+    return created
+  }
+
+  private dispatchNotification(order: Order): void {
+    if (!this.notifications) return
+    void this.notifications
+      .notifyOrderCreated(
+        order,
+        () => this.orders.claimOrderCreatedNotification(order.orderId),
+        () => this.orders.markOrderNotificationSent?.(order.orderId) ?? Promise.resolve(),
+        (err) => this.orders.markOrderNotificationFailed?.(order.orderId) ?? Promise.resolve(),
+      )
+      .catch((error) => {
+        console.error(`[OrderService] Background notification error for ${order.orderId}:`, error)
+      })
   }
 
   async trackOrder(orderId: string, phone: string) {
