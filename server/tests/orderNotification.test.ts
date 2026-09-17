@@ -4,6 +4,7 @@ import {
   DevelopmentWhatsAppProvider,
   GmailSmtpEmailProvider,
   OrderNotificationFormatter,
+  ResendEmailProvider,
 } from '../src/services/orderNotification'
 import { env } from '../src/config/env'
 import type { Order } from '../src/models/orderModel'
@@ -346,14 +347,93 @@ describe('owner order notifications', () => {
     }
   })
 
-  it('GmailSmtpEmailProvider uses IPv4 family: 4 in getSocket', () => {
-    const provider = new GmailSmtpEmailProvider()
-    const transporter = (provider as any).getTransporter()
-    expect(transporter.options.host).toBe('smtp.gmail.com')
-    expect(transporter.options.port).toBe(587)
-    expect(transporter.options.secure).toBe(false)
-    expect(transporter.options.requireTLS).toBe(true)
-    expect(typeof transporter.options.getSocket).toBe('function')
+  it('ResendEmailProvider sends order notification via Resend API', async () => {
+    const originalApiKey = env.RESEND_API_KEY
+    ;(env as any).RESEND_API_KEY = 're_test_key_12345'
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ id: 'email-resend-123' }),
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = fetchMock as any
+
+    try {
+      const provider = new ResendEmailProvider()
+      await provider.send({
+        event: 'ORDER_CREATED',
+        orderId: 'ORD-2026-000099',
+        message: 'Test notification body',
+        recipients: { email: 'admin@example.com' },
+      })
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(fetchMock).toHaveBeenCalledWith('https://api.resend.com/emails', {
+        method: 'POST',
+        headers: {
+          Authorization: 'Bearer re_test_key_12345',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          from: 'onboarding@resend.dev',
+          to: ['admin@example.com'],
+          subject: 'New Raja Store order ORD-2026-000099',
+          text: 'Test notification body',
+        }),
+      })
+    } finally {
+      ;(env as any).RESEND_API_KEY = originalApiKey
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('ResendEmailProvider throws descriptive error when Resend API returns non-200 response', async () => {
+    const originalApiKey = env.RESEND_API_KEY
+    ;(env as any).RESEND_API_KEY = 're_test_key_12345'
+
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 403,
+      statusText: 'Forbidden',
+      text: async () => '{"message":"Invalid API key"}',
+    })
+    const originalFetch = globalThis.fetch
+    globalThis.fetch = fetchMock as any
+
+    try {
+      const provider = new ResendEmailProvider()
+      await expect(
+        provider.send({
+          event: 'ORDER_CREATED',
+          orderId: 'ORD-2026-000099',
+          message: 'Test notification body',
+          recipients: { email: 'admin@example.com' },
+        }),
+      ).rejects.toThrow('Resend API error (403): {"message":"Invalid API key"}')
+    } finally {
+      ;(env as any).RESEND_API_KEY = originalApiKey
+      globalThis.fetch = originalFetch
+    }
+  })
+
+  it('ResendEmailProvider throws error when RESEND_API_KEY is not configured', async () => {
+    const originalApiKey = env.RESEND_API_KEY
+    ;(env as any).RESEND_API_KEY = ''
+
+    try {
+      const provider = new ResendEmailProvider()
+      await expect(
+        provider.send({
+          event: 'ORDER_CREATED',
+          orderId: 'ORD-2026-000099',
+          message: 'Test notification body',
+          recipients: { email: 'admin@example.com' },
+        }),
+      ).rejects.toThrow('RESEND_API_KEY is not configured')
+    } finally {
+      ;(env as any).RESEND_API_KEY = originalApiKey
+    }
   })
 
   it('Express app configures trust proxy 1 and rate limits without X-Forwarded-For error', async () => {

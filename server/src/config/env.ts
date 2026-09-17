@@ -22,6 +22,7 @@ const environmentSchema = z.object({
   ADMIN_NOTIFICATION_WHATSAPP: z.string().trim().optional().or(z.literal('')),
   GMAIL_SMTP_USER: z.string().trim().email().optional().or(z.literal('')),
   GMAIL_SMTP_APP_PASSWORD: z.string().trim().optional().or(z.literal('')),
+  RESEND_API_KEY: z.string().trim().optional().default(''),
   CLOUDINARY_CLOUD_NAME: z.string().optional().default(''),
   CLOUDINARY_API_KEY: z.string().optional().default(''),
   CLOUDINARY_API_SECRET: z.string().optional().default(''),

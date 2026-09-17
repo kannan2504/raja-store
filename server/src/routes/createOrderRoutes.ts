@@ -7,10 +7,10 @@ import type { OrderRepository } from '../repositories/orderRepository'
 import type { ProductRepository } from '../repositories/productRepository'
 import { createPaymentProofStorage, type PaymentProofStorage } from '../services/paymentProofStorage'
 import { OrderService } from '../services/orderService'
-import { AdminOrderNotificationService, DevelopmentWhatsAppProvider, GmailSmtpEmailProvider, OrderNotificationFormatter } from '../services/orderNotification'
+import { AdminOrderNotificationService, DevelopmentWhatsAppProvider, OrderNotificationFormatter, ResendEmailProvider } from '../services/orderNotification'
 
 export function createOrderRoutes(products: ProductRepository, orders: OrderRepository, proofStorage: PaymentProofStorage = createPaymentProofStorage()) {
-  const notifications = new AdminOrderNotificationService(new OrderNotificationFormatter(products), new DevelopmentWhatsAppProvider(), new GmailSmtpEmailProvider())
+  const notifications = new AdminOrderNotificationService(new OrderNotificationFormatter(products), new DevelopmentWhatsAppProvider(), new ResendEmailProvider())
   const service = new OrderService(products, orders, notifications)
   const router = Router()
   const orderRateLimit = rateLimit({ windowMs: 15 * 60 * 1000, limit: 20, standardHeaders: true, legacyHeaders: false, message: { success: false, code: 'RATE_LIMITED', message: 'Too many order attempts. Please try again later.' } })

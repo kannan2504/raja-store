@@ -1,8 +1,6 @@
 import type { Order } from '../models/orderModel'
 import type { ProductRepository } from '../repositories/productRepository'
 import { env } from '../config/env'
-import nodemailer, { type Transporter } from 'nodemailer'
-import net from 'node:net'
 
 export type OrderNotificationEvent = 'ORDER_CREATED'
 
@@ -34,58 +32,37 @@ export class DevelopmentWhatsAppProvider implements WhatsAppProvider {
   }
 }
 
-export class GmailSmtpEmailProvider implements EmailProvider {
-  private transporter: Transporter | null = null
-
-  private getTransporter(): Transporter {
-    if (!this.transporter) {
-      const user = env.GMAIL_SMTP_USER?.trim()
-      const pass = env.GMAIL_SMTP_APP_PASSWORD?.replace(/\s+/g, '')
-
-      this.transporter = nodemailer.createTransport({
-        host: 'smtp.gmail.com',
-        port: 587,
-        secure: false,
-        requireTLS: true,
-        auth: {
-          user,
-          pass,
-        },
-        connectionTimeout: 10000,
-        greetingTimeout: 5000,
-        socketTimeout: 15000,
-        getSocket: (options, callback) => {
-          const socket = net.connect(
-            {
-              host: options.host,
-              port: Number(options.port),
-              family: 4,
-              timeout: options.connectionTimeout,
-            },
-            () => callback(null, { connection: socket }),
-          )
-          socket.once('error', (err) => callback(err))
-        },
-      })
-    }
-    return this.transporter
-  }
-
+export class ResendEmailProvider implements EmailProvider {
   async send(notification: AdminOrderNotification) {
     const recipient = notification.recipients.email?.trim()
     if (!recipient) throw new Error('ADMIN_NOTIFICATION_EMAIL is not configured')
-    const user = env.GMAIL_SMTP_USER?.trim()
-    const pass = env.GMAIL_SMTP_APP_PASSWORD?.replace(/\s+/g, '')
-    if (!user || !pass) throw new Error('Gmail SMTP credentials are not configured')
-    await this.getTransporter().sendMail({
-      from: `"Raja Store" <${user}>`,
-      to: recipient,
-      subject: `New Raja Store order ${notification.orderId}`,
-      text: notification.message,
+    const apiKey = env.RESEND_API_KEY?.trim()
+    if (!apiKey) throw new Error('RESEND_API_KEY is not configured')
+
+    const response = await fetch('https://api.resend.com/emails', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        from: 'onboarding@resend.dev',
+        to: [recipient],
+        subject: `New Raja Store order ${notification.orderId}`,
+        text: notification.message,
+      }),
     })
-    console.log(`[GmailSmtpEmailProvider] Sent order notification for ${notification.orderId}`)
+
+    if (!response.ok) {
+      const errorBody = await response.text().catch(() => '')
+      throw new Error(`Resend API error (${response.status}): ${errorBody || response.statusText}`)
+    }
+
+    console.log(`[ResendEmailProvider] Sent order notification for ${notification.orderId}`)
   }
 }
+
+export const GmailSmtpEmailProvider = ResendEmailProvider
 
 export class OrderNotificationFormatter {
   constructor(private readonly products: ProductRepository) {}
