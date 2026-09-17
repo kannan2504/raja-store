@@ -16,7 +16,7 @@ const itemSchema = z.object({
 const paymentSchema = z.object({
   method: z.enum(['cod', 'manual_upi']),
   utrNumber: z.string().trim().regex(/^[A-Za-z0-9-]{6,40}$/).optional(),
-  proofFileId: z.string().uuid().optional(),
+  proofFileId: z.string().trim().min(1).max(200).optional(),
 })
 
 export const createOrderSchema = z.object({

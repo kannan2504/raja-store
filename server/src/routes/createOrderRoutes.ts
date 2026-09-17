@@ -5,11 +5,11 @@ import { makeCreateOrderController } from '../controllers/orderController'
 import { makeTrackingController } from '../controllers/trackingController'
 import type { OrderRepository } from '../repositories/orderRepository'
 import type { ProductRepository } from '../repositories/productRepository'
-import { LocalPrivatePaymentProofStorage, type PaymentProofStorage } from '../services/paymentProofStorage'
+import { createPaymentProofStorage, type PaymentProofStorage } from '../services/paymentProofStorage'
 import { OrderService } from '../services/orderService'
 import { AdminOrderNotificationService, DevelopmentWhatsAppProvider, GmailSmtpEmailProvider, OrderNotificationFormatter } from '../services/orderNotification'
 
-export function createOrderRoutes(products: ProductRepository, orders: OrderRepository, proofStorage: PaymentProofStorage = new LocalPrivatePaymentProofStorage()) {
+export function createOrderRoutes(products: ProductRepository, orders: OrderRepository, proofStorage: PaymentProofStorage = createPaymentProofStorage()) {
   const notifications = new AdminOrderNotificationService(new OrderNotificationFormatter(products), new DevelopmentWhatsAppProvider(), new GmailSmtpEmailProvider())
   const service = new OrderService(products, orders, notifications)
   const router = Router()
