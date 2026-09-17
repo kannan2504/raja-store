@@ -75,3 +75,18 @@ export function updateMyOrderStatus(orderId: string, newStatus: string): void {
     // Ignore storage errors
   }
 }
+
+/** Active statuses that count towards the navigation badge. */
+export const ACTIVE_ORDER_STATUSES = new Set([
+  'pending',
+  'confirmed',
+  'processing',
+  'shipped',
+  'out_for_delivery',
+])
+
+/** Returns count of active (non-delivered, non-cancelled) orders. */
+export function getActiveOrdersCount(): number {
+  return getMyOrders().filter((o) => ACTIVE_ORDER_STATUSES.has(o.orderStatus)).length
+}
+

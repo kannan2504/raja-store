@@ -29,7 +29,7 @@ import { useCart } from './context/CartContext'
 import type { Category, Product, ProductVariant } from './types/product'
 import { formatPrice, getDiscountPercent } from './utils/format'
 import { createOrder, trackOrder, type TrackedOrder } from './services/orderService'
-import { appendMyOrder, getMyOrders, updateMyOrderStatus } from './services/myOrdersService'
+import { appendMyOrder, getMyOrders, updateMyOrderStatus, getActiveOrdersCount } from './services/myOrdersService'
 import DevDatabasePage from './DevDatabasePage'
 import AdminPage from './AdminPage'
 import { API_BASE_URL } from './config'
@@ -262,16 +262,16 @@ function SiteHeader() {
 }
 
 /* ==========================================================================
-   MY ORDERS NAV LINK (desktop) — shows count badge when orders exist
+   MY ORDERS NAV LINK (desktop) — shows count badge for active orders
    ========================================================================== */
 function MyOrdersNavLink() {
   const location = useLocation()
   const [count, setCount] = useState(0)
 
   useEffect(() => {
-    const refresh = () => setCount(getMyOrders().length)
+    const refresh = () => setCount(getActiveOrdersCount())
     refresh()
-    // Re-read when storage changes (e.g. after order success)
+    // Re-read when storage changes (e.g. after order success or tracking status update)
     window.addEventListener('storage', refresh)
     window.addEventListener('raja-my-orders-updated', refresh)
     return () => {
@@ -283,7 +283,7 @@ function MyOrdersNavLink() {
   return (
     <Link to="/my-orders" className={location.pathname === '/my-orders' ? 'active' : ''} style={{ display: 'inline-flex', alignItems: 'center' }}>
       My Orders
-      {count > 0 && <span className="my-orders-nav-badge" aria-label={`${count} saved orders`}>{count}</span>}
+      {count > 0 && <span className="my-orders-nav-badge" aria-label={`${count} active orders`}>{count}</span>}
     </Link>
   )
 }
