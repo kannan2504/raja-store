@@ -2380,3 +2380,365 @@ img {
     scroll-behavior: auto !important;
   }
 }
+
+/* ==========================================================================
+   MY ORDERS — Nav count badge & page styles
+   ========================================================================== */
+
+/* Small count badge on "My Orders" nav link */
+.my-orders-nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 17px;
+  height: 17px;
+  padding: 0 4px;
+  background: var(--color-primary);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  border-radius: var(--radius-full);
+  margin-left: 4px;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+/* My Orders page container */
+.my-orders-container {
+  max-width: 780px;
+  margin: 0 auto;
+  padding: 32px 24px 80px;
+}
+
+.my-orders-header {
+  margin-bottom: 28px;
+}
+
+.my-orders-header h1 {
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin: 0 0 6px;
+  color: var(--text-primary);
+}
+
+.my-orders-header p {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+/* Per-order card */
+.my-order-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  padding: 20px 22px;
+  margin-bottom: 16px;
+  box-shadow: var(--shadow-sm);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  transition: box-shadow var(--transition-fast), border-color var(--transition-fast);
+}
+
+.my-order-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: var(--border-strong);
+}
+
+.my-order-icon {
+  width: 44px;
+  height: 44px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  border-radius: var(--radius-md);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.my-order-info {
+  flex: 1;
+  min-width: 0;
+}
+
+.my-order-id {
+  font-size: 15px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0 0 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.my-order-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 14px;
+  font-size: 12.5px;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.my-order-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.my-order-status-badge {
+  display: inline-block;
+  padding: 2px 9px;
+  border-radius: var(--radius-full);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+  letter-spacing: 0.01em;
+}
+
+.my-order-status-badge.status-pending {
+  background: #fff8e1;
+  color: #b45309;
+}
+
+.my-order-status-badge.status-pending_verification {
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+}
+
+.my-order-status-badge.status-confirmed,
+.my-order-status-badge.status-processing,
+.my-order-status-badge.status-shipped,
+.my-order-status-badge.status-out_for_delivery,
+.my-order-status-badge.status-delivered {
+  background: var(--color-success-bg);
+  color: var(--color-success);
+}
+
+.my-order-status-badge.status-cancelled {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+}
+
+[data-theme='dark'] .my-order-status-badge.status-pending {
+  background: #2d2006;
+  color: #fbbf24;
+}
+
+.my-order-track-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 9px 16px;
+  background: var(--color-primary-light);
+  color: var(--color-primary);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+  transition: background var(--transition-fast), color var(--transition-fast), border-color var(--transition-fast);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.my-order-track-btn:hover {
+  background: var(--color-primary);
+  color: #fff;
+}
+
+/* Empty state */
+.my-orders-empty {
+  text-align: center;
+  padding: 64px 24px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+}
+
+.my-orders-empty-icon {
+  width: 64px;
+  height: 64px;
+  background: var(--bg-surface);
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  margin-bottom: 4px;
+}
+
+.my-orders-empty h2 {
+  font-size: 20px;
+  font-weight: 700;
+  margin: 0;
+  color: var(--text-primary);
+}
+
+.my-orders-empty p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 360px;
+  line-height: 1.55;
+}
+
+.my-orders-empty-shop-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 24px;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast), transform var(--transition-fast);
+  margin-top: 4px;
+}
+
+.my-orders-empty-shop-btn:hover {
+  background: var(--color-primary-hover);
+}
+
+.my-orders-empty-shop-btn:active {
+  transform: scale(0.97);
+}
+
+.my-orders-device-note {
+  margin-top: 28px;
+  padding: 12px 16px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  font-size: 12.5px;
+  color: var(--text-muted);
+  text-align: center;
+  line-height: 1.5;
+}
+
+/* Mobile responsive - My Orders */
+@media (max-width: 600px) {
+  .my-order-card {
+    flex-wrap: wrap;
+    gap: 14px;
+  }
+
+  .my-order-track-btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* ==========================================================================
+   CHECKOUT — Inline field validation error styles
+   ========================================================================== */
+
+/* Required field asterisk */
+.field-required-star {
+  color: var(--color-error);
+  font-weight: 700;
+  margin-left: 2px;
+}
+
+/* Error state on input/textarea */
+.field-input.error-field,
+.field-textarea.error-field {
+  border-color: var(--color-error) !important;
+  box-shadow: 0 0 0 3px var(--color-error-bg) !important;
+}
+
+/* Inline error message below field */
+.field-error-msg {
+  font-size: 12px;
+  color: var(--color-error);
+  font-weight: 500;
+  line-height: 1.35;
+  display: flex;
+  align-items: flex-start;
+  gap: 4px;
+  margin-top: -2px;
+  animation: errorFadeIn 0.15s ease;
+}
+
+@keyframes errorFadeIn {
+  from { opacity: 0; transform: translateY(-3px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Banner near Place Order button when submit attempted + invalid */
+.checkout-incomplete-banner {
+  background: var(--color-error-bg);
+  color: var(--color-error);
+  border: 1px solid rgba(198, 40, 40, 0.25);
+  border-radius: var(--radius-md);
+  padding: 10px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  margin-bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  animation: errorFadeIn 0.18s ease;
+}
+
+/* ==========================================================================
+   ORDER SUCCESS — Save Order ID info box
+   ========================================================================== */
+
+.order-success-save-box {
+  background: var(--color-primary-light);
+  border: 1px solid rgba(31, 107, 122, 0.25);
+  border-radius: var(--radius-md);
+  padding: 16px 20px;
+  margin-top: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+}
+
+.order-success-save-box p {
+  font-size: 13.5px;
+  color: var(--text-secondary);
+  margin: 0;
+  line-height: 1.5;
+}
+
+.order-success-save-box strong {
+  color: var(--text-primary);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+}
+
+.view-my-orders-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 10px 20px;
+  background: var(--color-primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  font-size: 13.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--transition-fast);
+  text-decoration: none;
+  margin-top: 4px;
+}
+
+.view-my-orders-btn:hover {
+  background: var(--color-primary-hover);
+  color: #fff;
+}
+

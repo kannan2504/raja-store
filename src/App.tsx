@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import {
+  AlertCircle,
   ArrowLeft,
   ArrowRight,
   Check,
   ChevronRight,
+  ClipboardList,
   Copy,
   CreditCard,
   MapPin,
@@ -27,6 +29,7 @@ import { useCart } from './context/CartContext'
 import type { Category, Product, ProductVariant } from './types/product'
 import { formatPrice, getDiscountPercent } from './utils/format'
 import { createOrder, trackOrder, type TrackedOrder } from './services/orderService'
+import { appendMyOrder, getMyOrders } from './services/myOrdersService'
 import DevDatabasePage from './DevDatabasePage'
 import AdminPage from './AdminPage'
 import { API_BASE_URL } from './config'
@@ -139,6 +142,7 @@ function SiteHeader() {
               <Link to="/track-order" className={location.pathname === '/track-order' ? 'active' : ''}>
                 Track Order
               </Link>
+              <MyOrdersNavLink />
             </nav>
           </div>
 
@@ -227,6 +231,14 @@ function SiteHeader() {
             <Truck size={18} />
             <span>Track My Order</span>
           </Link>
+          <Link
+            to="/my-orders"
+            className={`drawer-link ${location.pathname === '/my-orders' ? 'active' : ''}`}
+            onClick={() => setDrawerOpen(false)}
+          >
+            <Package size={18} />
+            <span>My Orders</span>
+          </Link>
         </nav>
 
         <div className="drawer-footer">
@@ -246,6 +258,33 @@ function SiteHeader() {
         </div>
       </aside>
     </>
+  )
+}
+
+/* ==========================================================================
+   MY ORDERS NAV LINK (desktop) — shows count badge when orders exist
+   ========================================================================== */
+function MyOrdersNavLink() {
+  const location = useLocation()
+  const [count, setCount] = useState(0)
+
+  useEffect(() => {
+    const refresh = () => setCount(getMyOrders().length)
+    refresh()
+    // Re-read when storage changes (e.g. after order success)
+    window.addEventListener('storage', refresh)
+    window.addEventListener('raja-my-orders-updated', refresh)
+    return () => {
+      window.removeEventListener('storage', refresh)
+      window.removeEventListener('raja-my-orders-updated', refresh)
+    }
+  }, [])
+
+  return (
+    <Link to="/my-orders" className={location.pathname === '/my-orders' ? 'active' : ''} style={{ display: 'inline-flex', alignItems: 'center' }}>
+      My Orders
+      {count > 0 && <span className="my-orders-nav-badge" aria-label={`${count} saved orders`}>{count}</span>}
+    </Link>
   )
 }
 
@@ -1312,6 +1351,10 @@ function CheckoutPage() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
   const [copyFeedback, setCopyFeedback] = useState('')
+  // Validation: which fields have been interacted with (or all set on submit attempt)
+  const [touched, setTouched] = useState<Partial<Record<keyof CheckoutForm | 'payment' | 'utr' | 'proof', boolean>>>({})
+  // Whether Place Order was clicked with invalid fields (shows banner)
+  const [submitAttempted, setSubmitAttempted] = useState(false)
 
   const [paymentConfig, setPaymentConfig] = useState({
     storeName: 'Raja Store',
@@ -1319,6 +1362,16 @@ function CheckoutPage() {
     qrUrl: 'https://placehold.co/360x360/f3eadb/29382a?text=Raja+Store+UPI+QR',
   })
   const submittedRef = useRef(false)
+  // Refs for scroll-to-first-error
+  const fullNameRef = useRef<HTMLInputElement>(null)
+  const phoneRef = useRef<HTMLInputElement>(null)
+  const addressRef = useRef<HTMLTextAreaElement>(null)
+  const cityRef = useRef<HTMLInputElement>(null)
+  const stateRef = useRef<HTMLInputElement>(null)
+  const pincodeRef = useRef<HTMLInputElement>(null)
+  const paymentRef = useRef<HTMLDivElement>(null)
+  const utrRef = useRef<HTMLInputElement>(null)
+  const proofRef = useRef<HTMLInputElement>(null)
 
   const subtotal = getCartSubtotal()
   const delivery = Number(import.meta.env.VITE_DELIVERY_CHARGE ?? 50)
@@ -1365,11 +1418,45 @@ function CheckoutPage() {
 
   if (cartItems.length === 0) return null
 
+  // --- Validation helpers ---
+  function getFieldError(field: keyof CheckoutForm | 'payment' | 'utr' | 'proof'): string {
+    switch (field) {
+      case 'fullName':
+        return form.fullName.trim().length >= 2 ? '' : 'Full name is required (min. 2 characters)'
+      case 'phone':
+        return /^[6-9][0-9]{9}$/.test(form.phone.trim()) ? '' : 'Enter a valid 10-digit Indian mobile number'
+      case 'address':
+        return form.address.trim().length >= 5 ? '' : 'Delivery address is required (min. 5 characters)'
+      case 'city':
+        return form.city.trim().length >= 2 ? '' : 'City / Town is required'
+      case 'state':
+        return form.state.trim().length >= 2 ? '' : 'State is required'
+      case 'pincode':
+        return /^[1-9][0-9]{5}$/.test(form.pincode.trim()) ? '' : 'Enter a valid 6-digit pincode'
+      case 'payment':
+        return paymentMethod !== '' ? '' : 'Please select a payment method'
+      case 'utr':
+        return paymentMethod === 'manual_upi' && !utrNumber.trim() ? 'Enter the UPI transaction ID / UTR number' : ''
+      case 'proof':
+        return paymentMethod === 'manual_upi' && !proof ? 'Please upload your payment screenshot' : ''
+      default:
+        return ''
+    }
+  }
+
+  function showError(field: keyof CheckoutForm | 'payment' | 'utr' | 'proof'): string {
+    return touched[field] ? getFieldError(field) : ''
+  }
+
   const handleFieldChange =
     (field: keyof CheckoutForm) =>
     (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
       setForm((prev) => ({ ...prev, [field]: e.target.value }))
     }
+
+  const handleBlur = (field: keyof CheckoutForm | 'payment' | 'utr' | 'proof') => () => {
+    setTouched((prev) => ({ ...prev, [field]: true }))
+  }
 
   function handleCopyUPI() {
     navigator.clipboard
@@ -1387,15 +1474,41 @@ function CheckoutPage() {
       setError('Minimum order amount is ₹200.')
       return
     }
-    if (!paymentMethod) {
-      setError('Please select a payment method.')
-      return
-    }
-    if (paymentMethod === 'manual_upi' && (!utrNumber || !proof)) {
-      setError('Please provide your UPI UTR number and payment screenshot.')
+
+    // Mark all required fields as touched to surface all errors
+    const allFields: Array<keyof CheckoutForm | 'payment' | 'utr' | 'proof'> = [
+      'fullName', 'phone', 'address', 'city', 'state', 'pincode', 'payment', 'utr', 'proof',
+    ]
+    const allTouched = Object.fromEntries(allFields.map((f) => [f, true]))
+    setTouched(allTouched)
+
+    // Check if any required field has an error
+    const hasErrors = allFields.some((f) => getFieldError(f) !== '')
+    if (hasErrors) {
+      setSubmitAttempted(true)
+      // Scroll to the first invalid field
+      const refMap: Array<[keyof CheckoutForm | 'payment' | 'utr' | 'proof', React.RefObject<HTMLElement | null>]> = [
+        ['fullName', fullNameRef],
+        ['phone', phoneRef],
+        ['address', addressRef],
+        ['city', cityRef],
+        ['state', stateRef],
+        ['pincode', pincodeRef],
+        ['payment', paymentRef],
+        ['utr', utrRef],
+        ['proof', proofRef],
+      ]
+      for (const [field, ref] of refMap) {
+        if (getFieldError(field) !== '' && ref.current) {
+          ref.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+          ref.current.focus()
+          break
+        }
+      }
       return
     }
 
+    setSubmitAttempted(false)
     setSubmitting(true)
     setError('')
 
@@ -1410,7 +1523,7 @@ function CheckoutPage() {
         cartItems,
         requestKey,
         {
-          method: paymentMethod,
+          method: paymentMethod as PaymentMethod,
           utrNumber: paymentMethod === 'manual_upi' ? utrNumber : undefined,
           proof: paymentMethod === 'manual_upi' ? proof : undefined,
         }
@@ -1467,34 +1580,44 @@ function CheckoutPage() {
 
                 <div className="checkout-fields-grid">
                   <div className="field-group">
-                    <label htmlFor="fullName">Full Name</label>
+                    <label htmlFor="fullName">Full Name<span className="field-required-star">*</span></label>
                     <input
                       id="fullName"
-                      className="field-input"
+                      ref={fullNameRef}
+                      className={`field-input${showError('fullName') ? ' error-field' : ''}`}
                       required
                       minLength={2}
                       maxLength={100}
                       value={form.fullName}
                       onChange={handleFieldChange('fullName')}
+                      onBlur={handleBlur('fullName')}
                       placeholder="e.g. Ramesh Kumar"
                       autoComplete="name"
+                      aria-describedby={showError('fullName') ? 'err-fullName' : undefined}
+                      aria-invalid={Boolean(showError('fullName'))}
                     />
+                    {showError('fullName') && <span id="err-fullName" className="field-error-msg" role="alert"><AlertCircle size={12} />{showError('fullName')}</span>}
                   </div>
 
                   <div className="field-group">
-                    <label htmlFor="phone">10-Digit Mobile Number</label>
+                    <label htmlFor="phone">Mobile Number<span className="field-required-star">*</span></label>
                     <input
                       id="phone"
-                      className="field-input"
+                      ref={phoneRef}
+                      className={`field-input${showError('phone') ? ' error-field' : ''}`}
                       required
                       pattern="[6-9][0-9]{9}"
                       title="Enter a valid 10-digit Indian mobile number starting with 6, 7, 8, or 9"
                       value={form.phone}
                       onChange={handleFieldChange('phone')}
+                      onBlur={handleBlur('phone')}
                       placeholder="9876543210"
                       inputMode="numeric"
                       autoComplete="tel"
+                      aria-describedby={showError('phone') ? 'err-phone' : undefined}
+                      aria-invalid={Boolean(showError('phone'))}
                     />
+                    {showError('phone') && <span id="err-phone" className="field-error-msg" role="alert"><AlertCircle size={12} />{showError('phone')}</span>}
                   </div>
 
                   <div className="field-group full-width">
@@ -1513,64 +1636,84 @@ function CheckoutPage() {
                   </div>
 
                   <div className="field-group full-width">
-                    <label htmlFor="address">Delivery Address (House No, Building, Street, Area)</label>
+                    <label htmlFor="address">Delivery Address (House No, Building, Street, Area)<span className="field-required-star">*</span></label>
                     <textarea
                       id="address"
-                      className="field-textarea"
+                      ref={addressRef}
+                      className={`field-textarea${showError('address') ? ' error-field' : ''}`}
                       required
                       minLength={5}
                       maxLength={300}
                       value={form.address}
                       onChange={handleFieldChange('address')}
+                      onBlur={handleBlur('address')}
                       placeholder="Flat 102, Shanti Vihar, MG Road"
                       autoComplete="street-address"
+                      aria-describedby={showError('address') ? 'err-address' : undefined}
+                      aria-invalid={Boolean(showError('address'))}
                     />
+                    {showError('address') && <span id="err-address" className="field-error-msg" role="alert"><AlertCircle size={12} />{showError('address')}</span>}
                   </div>
 
                   <div className="field-group">
-                    <label htmlFor="city">City / Town</label>
+                    <label htmlFor="city">City / Town<span className="field-required-star">*</span></label>
                     <input
                       id="city"
-                      className="field-input"
+                      ref={cityRef}
+                      className={`field-input${showError('city') ? ' error-field' : ''}`}
                       required
                       minLength={2}
                       maxLength={80}
                       value={form.city}
                       onChange={handleFieldChange('city')}
+                      onBlur={handleBlur('city')}
                       placeholder="e.g. Jaipur"
                       autoComplete="address-level2"
+                      aria-describedby={showError('city') ? 'err-city' : undefined}
+                      aria-invalid={Boolean(showError('city'))}
                     />
+                    {showError('city') && <span id="err-city" className="field-error-msg" role="alert"><AlertCircle size={12} />{showError('city')}</span>}
                   </div>
 
                   <div className="field-group">
-                    <label htmlFor="state">State</label>
+                    <label htmlFor="state">State<span className="field-required-star">*</span></label>
                     <input
                       id="state"
-                      className="field-input"
+                      ref={stateRef}
+                      className={`field-input${showError('state') ? ' error-field' : ''}`}
                       required
                       minLength={2}
                       maxLength={80}
                       value={form.state}
                       onChange={handleFieldChange('state')}
+                      onBlur={handleBlur('state')}
                       placeholder="e.g. Rajasthan"
                       autoComplete="address-level1"
+                      aria-describedby={showError('state') ? 'err-state' : undefined}
+                      aria-invalid={Boolean(showError('state'))}
                     />
+                    {showError('state') && <span id="err-state" className="field-error-msg" role="alert"><AlertCircle size={12} />{showError('state')}</span>}
                   </div>
 
                   <div className="field-group">
-                    <label htmlFor="pincode">6-Digit Pincode</label>
+                    <label htmlFor="pincode">6-Digit Pincode<span className="field-required-star">*</span></label>
                     <input
                       id="pincode"
-                      className="field-input"
+                      ref={pincodeRef}
+                      className={`field-input${showError('pincode') ? ' error-field' : ''}`}
                       required
                       pattern="[1-9][0-9]{5}"
                       title="Enter a valid 6-digit Indian pincode"
                       value={form.pincode}
                       onChange={handleFieldChange('pincode')}
+                      onBlur={handleBlur('pincode')}
                       placeholder="302001"
                       inputMode="numeric"
                       autoComplete="postal-code"
+                      aria-describedby={showError('pincode') ? 'err-pincode' : undefined}
+                      aria-invalid={Boolean(showError('pincode'))}
                     />
+                    {showError('pincode') && <span id="err-pincode" className="field-error-msg" role="alert"><AlertCircle size={12} />{showError('pincode')}</span>}
                   </div>
 
                   <div className="field-group">
@@ -1593,10 +1736,10 @@ function CheckoutPage() {
               <section className="checkout-card-section" aria-label="Payment Selection">
                 <div className="section-title-row">
                   <span className="section-num-badge">2</span>
-                  <h2>Payment Method</h2>
+                  <h2>Payment Method<span className="field-required-star" style={{ marginLeft: 4 }}>*</span></h2>
                 </div>
 
-                <div className="payment-selector-grid">
+                <div className="payment-selector-grid" ref={paymentRef}>
                   <label
                     className={`payment-card-option ${paymentMethod === 'cod' ? 'selected' : ''}`}
                   >
@@ -1605,7 +1748,7 @@ function CheckoutPage() {
                       name="checkoutPayment"
                       value="cod"
                       checked={paymentMethod === 'cod'}
-                      onChange={() => setPaymentMethod('cod')}
+                      onChange={() => { setPaymentMethod('cod'); setTouched((p) => ({ ...p, payment: true })) }}
                     />
                     <div className="option-content">
                       <strong>Cash on Delivery (COD)</strong>
@@ -1621,7 +1764,7 @@ function CheckoutPage() {
                       name="checkoutPayment"
                       value="manual_upi"
                       checked={paymentMethod === 'manual_upi'}
-                      onChange={() => setPaymentMethod('manual_upi')}
+                      onChange={() => { setPaymentMethod('manual_upi'); setTouched((p) => ({ ...p, payment: true })) }}
                     />
                     <div className="option-content">
                       <strong>UPI / QR Code Instant Payment</strong>
@@ -1666,30 +1809,39 @@ function CheckoutPage() {
 
                     <div className="manual-proof-upload">
                       <div className="field-group">
-                        <label htmlFor="utr">UPI Transaction ID / UTR Number</label>
+                        <label htmlFor="utr">UPI Transaction ID / UTR Number<span className="field-required-star">*</span></label>
                         <input
                           id="utr"
-                          className="field-input"
+                          ref={utrRef}
+                          className={`field-input${showError('utr') ? ' error-field' : ''}`}
                           required
                           minLength={6}
                           maxLength={40}
                           value={utrNumber}
                           onChange={(e) => setUtrNumber(e.target.value)}
+                          onBlur={handleBlur('utr')}
                           placeholder="e.g. 429381029381"
+                          aria-describedby={showError('utr') ? 'err-utr' : undefined}
+                          aria-invalid={Boolean(showError('utr'))}
                         />
+                        {showError('utr') && <span id="err-utr" className="field-error-msg" role="alert"><AlertCircle size={12} />{showError('utr')}</span>}
                       </div>
 
                       <div className="field-group">
-                        <label htmlFor="proof">Payment Screenshot</label>
+                        <label htmlFor="proof">Payment Screenshot<span className="field-required-star">*</span></label>
                         <div className="file-input-wrapper">
                           <input
                             id="proof"
+                            ref={proofRef}
                             type="file"
                             required
                             accept=".jpg,.jpeg,.png,.webp,image/jpeg,image/png,image/webp"
-                            onChange={(e) => setProof(e.target.files?.[0])}
+                            onChange={(e) => { setProof(e.target.files?.[0]); setTouched((p) => ({ ...p, proof: true })) }}
+                            aria-describedby={showError('proof') ? 'err-proof' : undefined}
+                            aria-invalid={Boolean(showError('proof'))}
                           />
                         </div>
+                        {showError('proof') && <span id="err-proof" className="field-error-msg" role="alert"><AlertCircle size={12} />{showError('proof')}</span>}
                       </div>
 
                       <div className="payment-safety-note">
@@ -1749,7 +1901,12 @@ function CheckoutPage() {
                 </div>
               )}
 
-              {!paymentMethod && (
+              {!paymentMethod && touched.payment && (
+                <div style={{ fontSize: '12px', color: 'var(--color-error)', marginTop: '8px', display: 'flex', alignItems: 'center', gap: 5 }}>
+                  <AlertCircle size={12} /> Please select a payment method above.
+                </div>
+              )}
+              {!paymentMethod && !touched.payment && (
                 <div style={{ fontSize: '12px', color: 'var(--color-primary)', marginTop: '8px' }}>
                   Please select a payment method above.
                 </div>
@@ -1757,10 +1914,17 @@ function CheckoutPage() {
 
               {error && <div className="error-banner">{error}</div>}
 
+              {/* Incomplete fields banner — shown only after a failed submit attempt */}
+              {submitAttempted && !isFormValid && (
+                <div className="checkout-incomplete-banner" role="alert">
+                  <AlertCircle size={16} /> Please complete the highlighted fields above.
+                </div>
+              )}
+
               <button
                 className="checkout-place-order-btn"
                 type="submit"
-                disabled={submitting || !isFormValid || subtotal < 200}
+                disabled={submitting || subtotal < 200}
               >
                 {submitting
                   ? 'Placing Order...'
@@ -1795,7 +1959,7 @@ function CheckoutPage() {
             <button
               className="mobile-bar-btn"
               type="submit"
-              disabled={submitting || !isFormValid || subtotal < 200}
+              disabled={submitting || subtotal < 200}
               aria-label="Confirm and place order"
             >
               {submitting
@@ -1986,6 +2150,7 @@ function TrackOrderPage() {
    ========================================================================== */
 function OrderSuccessPage() {
   const location = useLocation()
+  const navigate = useNavigate()
   const { orderId, total, paymentMethod, paymentStatus } = (location.state ?? {}) as {
     orderId?: string
     total?: number
@@ -1994,6 +2159,20 @@ function OrderSuccessPage() {
   }
   const { orderId: routeOrderId } = useParams()
   const finalId = orderId ?? routeOrderId
+
+  // Persist this order to device localStorage (idempotent)
+  useEffect(() => {
+    if (!finalId) return
+    appendMyOrder({
+      orderId: finalId,
+      total: typeof total === 'number' ? total : 0,
+      paymentMethod: paymentMethod ?? 'cod',
+      paymentStatus: paymentStatus ?? 'pending',
+      placedAt: new Date().toISOString(),
+    })
+    // Notify My Orders nav badge to refresh
+    window.dispatchEvent(new Event('raja-my-orders-updated'))
+  }, [finalId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <Layout>
@@ -2028,6 +2207,20 @@ function OrderSuccessPage() {
               <strong>{typeof total === 'number' ? formatPrice(total) : 'Confirmed'}</strong>
             </div>
           </div>
+
+          {/* Save Order ID reminder + View My Orders */}
+          {finalId && (
+            <div className="order-success-save-box">
+              <p>Keep your Order ID safe for tracking on any device:</p>
+              <strong>#{finalId}</strong>
+              <p style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                It has been saved to your My Orders on this device.
+              </p>
+              <Link className="view-my-orders-btn" to="/my-orders">
+                <ClipboardList size={15} /> View My Orders
+              </Link>
+            </div>
+          )}
 
           <div className="status-actions-row">
             <Link className="status-primary-btn" to="/track-order">
@@ -2072,6 +2265,129 @@ function OrderFailurePage() {
 }
 
 /* ==========================================================================
+   MY ORDERS PAGE
+   ========================================================================== */
+function MyOrdersPage() {
+  const navigate = useNavigate()
+  const [orders, setOrders] = useState(() => getMyOrders())
+
+  // Refresh on storage events (multi-tab)
+  useEffect(() => {
+    const refresh = () => setOrders(getMyOrders())
+    window.addEventListener('storage', refresh)
+    window.addEventListener('raja-my-orders-updated', refresh)
+    return () => {
+      window.removeEventListener('storage', refresh)
+      window.removeEventListener('raja-my-orders-updated', refresh)
+    }
+  }, [])
+
+  function handleTrack(orderId: string) {
+    // Pre-fill the orderId in the tracking page via sessionStorage; customer still must enter phone
+    try {
+      const existing = JSON.parse(
+        sessionStorage.getItem('raja-store-tracking-lookup') ?? 'null'
+      ) as { orderId?: string; phone?: string } | null
+      sessionStorage.setItem(
+        'raja-store-tracking-lookup',
+        JSON.stringify({ orderId, phone: existing?.phone ?? '' })
+      )
+    } catch { /* ignore */ }
+    navigate('/track-order')
+  }
+
+  function formatOrderDate(isoString: string) {
+    try {
+      return new Date(isoString).toLocaleDateString('en-IN', {
+        day: '2-digit', month: 'short', year: 'numeric',
+      })
+    } catch {
+      return isoString
+    }
+  }
+
+  function paymentLabel(method: string) {
+    if (method === 'manual_upi') return 'UPI / QR'
+    if (method === 'cod') return 'Cash on Delivery'
+    return method
+  }
+
+  function statusBadgeClass(status: string) {
+    return `my-order-status-badge status-${status.replace(/\s/g, '_')}`
+  }
+
+  function statusLabel(status: string) {
+    return status.replaceAll('_', ' ')
+  }
+
+  return (
+    <Layout>
+      <div className="my-orders-container">
+        <div className="my-orders-header">
+          <h1>My Orders</h1>
+          <p>Orders placed on this browser. Use Order ID + mobile to track on any device.</p>
+        </div>
+
+        {orders.length === 0 ? (
+          <div className="my-orders-empty">
+            <div className="my-orders-empty-icon">
+              <Package size={28} />
+            </div>
+            <h2>No orders yet</h2>
+            <p>
+              Orders you place on Raja Store will appear here for easy reference. You can also track any order using your Order ID and mobile number.
+            </p>
+            <button
+              className="my-orders-empty-shop-btn"
+              onClick={() => navigate('/products')}
+            >
+              <ShoppingBag size={16} /> Start Shopping
+            </button>
+          </div>
+        ) : (
+          <>
+            {orders.map((order) => (
+              <div className="my-order-card" key={order.orderId}>
+                <div className="my-order-icon">
+                  <Package size={20} />
+                </div>
+
+                <div className="my-order-info">
+                  <p className="my-order-id">#{order.orderId}</p>
+                  <div className="my-order-meta">
+                    <span>{formatOrderDate(order.placedAt)}</span>
+                    <span>•</span>
+                    <span>{formatPrice(order.total)}</span>
+                    <span>•</span>
+                    <span>{paymentLabel(order.paymentMethod)}</span>
+                    <span>•</span>
+                    <span className={statusBadgeClass(order.paymentStatus)}>
+                      {statusLabel(order.paymentStatus)}
+                    </span>
+                  </div>
+                </div>
+
+                <button
+                  className="my-order-track-btn"
+                  onClick={() => handleTrack(order.orderId)}
+                  aria-label={`Track order ${order.orderId}`}
+                >
+                  <Truck size={14} /> Track Order
+                </button>
+              </div>
+            ))}
+          </>
+        )}
+
+        <div className="my-orders-device-note">
+          🔒 Orders are saved only on this browser. Use Order ID + mobile number on <Link to="/track-order" style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Track Order</Link> to check from any device.
+        </div>
+      </div>
+    </Layout>
+  )
+}
+
+/* ==========================================================================
    MAIN APP ROUTER
    ========================================================================== */
 export default function App() {
@@ -2086,6 +2402,7 @@ export default function App() {
         <Route path="/order-success/:orderId" element={<OrderSuccessPage />} />
         <Route path="/order-failure" element={<OrderFailurePage />} />
         <Route path="/track-order" element={<TrackOrderPage />} />
+        <Route path="/my-orders" element={<MyOrdersPage />} />
         <Route path="/dev/database" element={<DevDatabasePage />} />
         <Route path="/admin" element={<AdminPage />} />
       </Routes>
