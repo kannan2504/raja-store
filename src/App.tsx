@@ -2151,23 +2151,30 @@ function TrackOrderPage() {
 function OrderSuccessPage() {
   const location = useLocation()
   const navigate = useNavigate()
-  const { orderId, total, paymentMethod, paymentStatus } = (location.state ?? {}) as {
+  const {
+    orderId,
+    total,
+    paymentMethod,
+    paymentStatus,
+    status: orderStatus,
+  } = (location.state ?? {}) as {
     orderId?: string
     total?: number
     paymentMethod?: string
     paymentStatus?: string
+    status?: string // fulfillment status from order response
   }
   const { orderId: routeOrderId } = useParams()
   const finalId = orderId ?? routeOrderId
 
-  // Persist this order to device localStorage (idempotent)
+  // Persist this order to device localStorage (idempotent — no phone stored)
   useEffect(() => {
     if (!finalId) return
     appendMyOrder({
       orderId: finalId,
       total: typeof total === 'number' ? total : 0,
       paymentMethod: paymentMethod ?? 'cod',
-      paymentStatus: paymentStatus ?? 'pending',
+      orderStatus: orderStatus ?? 'pending',
       placedAt: new Date().toISOString(),
     })
     // Notify My Orders nav badge to refresh
@@ -2267,9 +2274,17 @@ function OrderFailurePage() {
 /* ==========================================================================
    MY ORDERS PAGE
    ========================================================================== */
+const COMPLETED_STATUSES = new Set(['delivered', 'cancelled'])
+
+function isCompletedOrder(status: string) {
+  return COMPLETED_STATUSES.has(status)
+}
+
 function MyOrdersPage() {
   const navigate = useNavigate()
-  const [orders, setOrders] = useState(() => getMyOrders())
+  const [orders, setOrders] = useState<import('./services/myOrdersService').StoredOrder[]>(
+    () => getMyOrders()
+  )
 
   // Refresh on storage events (multi-tab)
   useEffect(() => {
@@ -2281,6 +2296,14 @@ function MyOrdersPage() {
       window.removeEventListener('raja-my-orders-updated', refresh)
     }
   }, [])
+
+  // Sort: active orders first (newest first within group), then completed (delivered/cancelled)
+  const sortedOrders = [...orders].sort((a, b) => {
+    const aCompleted = isCompletedOrder(a.orderStatus)
+    const bCompleted = isCompletedOrder(b.orderStatus)
+    if (aCompleted !== bCompleted) return aCompleted ? 1 : -1
+    return new Date(b.placedAt).getTime() - new Date(a.placedAt).getTime()
+  })
 
   function handleTrack(orderId: string) {
     // Pre-fill the orderId in the tracking page via sessionStorage; customer still must enter phone
@@ -2312,12 +2335,21 @@ function MyOrdersPage() {
     return method
   }
 
-  function statusBadgeClass(status: string) {
-    return `my-order-status-badge status-${status.replace(/\s/g, '_')}`
+  function orderStatusBadgeClass(status: string) {
+    return `my-order-status-badge status-fulfillment-${status.replace(/[^a-z_]/g, '')}`
   }
 
-  function statusLabel(status: string) {
-    return status.replaceAll('_', ' ')
+  function orderStatusLabel(status: string) {
+    const labels: Record<string, string> = {
+      pending: 'Pending',
+      confirmed: 'Confirmed',
+      processing: 'Processing',
+      shipped: 'Shipped',
+      out_for_delivery: 'Out for Delivery',
+      delivered: 'Delivered',
+      cancelled: 'Cancelled',
+    }
+    return labels[status] ?? status.replaceAll('_', ' ')
   }
 
   return (
@@ -2328,7 +2360,7 @@ function MyOrdersPage() {
           <p>Orders placed on this browser. Use Order ID + mobile to track on any device.</p>
         </div>
 
-        {orders.length === 0 ? (
+        {sortedOrders.length === 0 ? (
           <div className="my-orders-empty">
             <div className="my-orders-empty-icon">
               <Package size={28} />
@@ -2346,41 +2378,49 @@ function MyOrdersPage() {
           </div>
         ) : (
           <>
-            {orders.map((order) => (
-              <div className="my-order-card" key={order.orderId}>
-                <div className="my-order-icon">
-                  <Package size={20} />
-                </div>
-
-                <div className="my-order-info">
-                  <p className="my-order-id">#{order.orderId}</p>
-                  <div className="my-order-meta">
-                    <span>{formatOrderDate(order.placedAt)}</span>
-                    <span>•</span>
-                    <span>{formatPrice(order.total)}</span>
-                    <span>•</span>
-                    <span>{paymentLabel(order.paymentMethod)}</span>
-                    <span>•</span>
-                    <span className={statusBadgeClass(order.paymentStatus)}>
-                      {statusLabel(order.paymentStatus)}
-                    </span>
-                  </div>
-                </div>
-
-                <button
-                  className="my-order-track-btn"
-                  onClick={() => handleTrack(order.orderId)}
-                  aria-label={`Track order ${order.orderId}`}
+            {sortedOrders.map((order) => {
+              const completed = isCompletedOrder(order.orderStatus)
+              return (
+                <div
+                  className={`my-order-card${completed ? ' is-completed' : ''}`}
+                  key={order.orderId}
                 >
-                  <Truck size={14} /> Track Order
-                </button>
-              </div>
-            ))}
+                  <div className="my-order-icon">
+                    <Package size={20} />
+                  </div>
+
+                  <div className="my-order-info">
+                    <p className="my-order-id">#{order.orderId}</p>
+                    <div className="my-order-meta">
+                      <span>{formatOrderDate(order.placedAt)}</span>
+                      <span>•</span>
+                      <span>{formatPrice(order.total)}</span>
+                      <span>•</span>
+                      <span>{paymentLabel(order.paymentMethod)}</span>
+                      <span>•</span>
+                      <span className={orderStatusBadgeClass(order.orderStatus)}>
+                        {orderStatusLabel(order.orderStatus)}
+                      </span>
+                    </div>
+                  </div>
+
+                  <button
+                    className="my-order-track-btn"
+                    onClick={() => handleTrack(order.orderId)}
+                    aria-label={`Track order ${order.orderId}`}
+                  >
+                    <Truck size={14} /> Track Order
+                  </button>
+                </div>
+              )
+            })}
           </>
         )}
 
         <div className="my-orders-device-note">
-          🔒 Orders are saved only on this browser. Use Order ID + mobile number on <Link to="/track-order" style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Track Order</Link> to check from any device.
+          🔒 Orders are saved only on this browser. Use Order ID + mobile number on{' '}
+          <Link to="/track-order" style={{ color: 'var(--color-primary)', fontWeight: 600 }}>Track Order</Link>{' '}
+          to check from any device.
         </div>
       </div>
     </Layout>

@@ -2500,33 +2500,57 @@ img {
   letter-spacing: 0.01em;
 }
 
-.my-order-status-badge.status-pending {
+.my-order-status-badge.status-fulfillment-pending {
   background: #fff8e1;
   color: #b45309;
 }
 
-.my-order-status-badge.status-pending_verification {
+.my-order-status-badge.status-fulfillment-confirmed,
+.my-order-status-badge.status-fulfillment-processing {
   background: var(--color-primary-light);
   color: var(--color-primary);
 }
 
-.my-order-status-badge.status-confirmed,
-.my-order-status-badge.status-processing,
-.my-order-status-badge.status-shipped,
-.my-order-status-badge.status-out_for_delivery,
-.my-order-status-badge.status-delivered {
+.my-order-status-badge.status-fulfillment-shipped,
+.my-order-status-badge.status-fulfillment-out_for_delivery {
+  background: #e8f4fd;
+  color: #1565c0;
+}
+
+.my-order-status-badge.status-fulfillment-delivered {
   background: var(--color-success-bg);
   color: var(--color-success);
 }
 
-.my-order-status-badge.status-cancelled {
+.my-order-status-badge.status-fulfillment-cancelled {
   background: var(--color-error-bg);
   color: var(--color-error);
 }
 
-[data-theme='dark'] .my-order-status-badge.status-pending {
+[data-theme='dark'] .my-order-status-badge.status-fulfillment-pending {
   background: #2d2006;
   color: #fbbf24;
+}
+
+[data-theme='dark'] .my-order-status-badge.status-fulfillment-shipped,
+[data-theme='dark'] .my-order-status-badge.status-fulfillment-out_for_delivery {
+  background: #0d2137;
+  color: #64b5f6;
+}
+
+/* Completed (delivered / cancelled) order card — subtle faded appearance */
+.my-order-card.is-completed {
+  opacity: 0.72;
+  background: var(--bg-surface);
+}
+
+.my-order-card.is-completed:hover {
+  opacity: 0.9;
+}
+
+.my-order-card.is-completed .my-order-icon {
+  background: var(--bg-subtle);
+  color: var(--text-muted);
 }
 
 .my-order-track-btn {
