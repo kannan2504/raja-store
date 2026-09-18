@@ -53,6 +53,8 @@ export const adminApi = {
       method: 'POST',
       body: JSON.stringify({ products }),
     }),
+  deleteProduct: (token: string, id: string) =>
+    adminFetch<{ success: true; productId: string }>(`/api/admin/products/${encodeURIComponent(id)}`, token, { method: 'DELETE' }),
 }
 
 export function downloadProductTemplateCsv() {

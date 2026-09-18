@@ -129,7 +129,7 @@ function SiteHeader() {
             <Link className="brand" to="/" aria-label="Raja Store Home">
               <span className="brand-mark">R</span>
               <span className="brand-text">
-                raja<span className="brand-dot">.</span>store
+                raja<span className="brand-dot"></span>store
               </span>
             </Link>
             <nav className="desktop-nav" aria-label="Primary navigation">
@@ -1450,9 +1450,9 @@ function CheckoutPage() {
 
   const handleFieldChange =
     (field: keyof CheckoutForm) =>
-    (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
-      setForm((prev) => ({ ...prev, [field]: e.target.value }))
-    }
+      (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
+        setForm((prev) => ({ ...prev, [field]: e.target.value }))
+      }
 
   const handleBlur = (field: keyof CheckoutForm | 'payment' | 'utr' | 'proof') => () => {
     setTouched((prev) => ({ ...prev, [field]: true }))
@@ -1929,8 +1929,8 @@ function CheckoutPage() {
                 {submitting
                   ? 'Placing Order...'
                   : subtotal < 200
-                  ? `Add ${formatPrice(200 - subtotal)} to Order`
-                  : `Place Order • ${formatPrice(total)}`}
+                    ? `Add ${formatPrice(200 - subtotal)} to Order`
+                    : `Place Order • ${formatPrice(total)}`}
               </button>
 
               <Link
@@ -1965,8 +1965,8 @@ function CheckoutPage() {
               {submitting
                 ? 'Placing...'
                 : subtotal < 200
-                ? `Add ${formatPrice(200 - subtotal)}`
-                : 'Place Order'}{' '}
+                  ? `Add ${formatPrice(200 - subtotal)}`
+                  : 'Place Order'}{' '}
               <ArrowRight size={15} />
             </button>
           </div>

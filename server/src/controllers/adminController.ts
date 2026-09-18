@@ -184,5 +184,16 @@ export function makeAdminProductController(storage: ProductImageStorage) { retur
 			totalProcessed: products.length,
 		})
 	},
+	deleteProduct: async (request: Request, response: Response) => {
+		const existing = await ProductModel.findOne({ productId: request.params.productId })
+		if (!existing) {
+			return response.status(404).json({ success: false, code: 'PRODUCT_NOT_FOUND', message: 'Product not found.' })
+		}
+		// Delete all associated images from storage before removing the document
+		const images = (existing.images ?? []).filter((img): img is string => typeof img === 'string')
+		await Promise.all(images.map((img) => storage.delete(img)))
+		await ProductModel.deleteOne({ productId: request.params.productId })
+		response.json({ success: true, productId: request.params.productId })
+	},
 } }
 export async function updateAdminStock(request: Request, response: Response) { const parsed = adminStockSchema.safeParse(request.body); if (!parsed.success) return response.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'Stock must be a non-negative integer.' }); const product = await ProductModel.findOneAndUpdate({ productId: request.params.productId }, { $set: { stock: parsed.data.stock, updatedAt: new Date() } }, { new: true, runValidators: true }); if (!product) return response.status(404).json({ success: false, code: 'PRODUCT_NOT_FOUND', message: 'Product not found.' }); response.json({ success: true, product: { productId: product.productId, stock: product.stock } }) }

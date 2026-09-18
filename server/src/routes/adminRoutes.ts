@@ -79,6 +79,7 @@ export function createAdminRoutes(
   )
 
   adminRoutes.patch('/products/:productId/stock', updateAdminStock)
+  adminRoutes.delete('/products/:productId', productImages.deleteProduct)
   adminRoutes.post('/products/bulk-upload-image', bulkImageUpload.array('images', 10), productImages.bulkUploadImages)
   adminRoutes.post('/products/bulk-import', productImages.bulkImport)
 
