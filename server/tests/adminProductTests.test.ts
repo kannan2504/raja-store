@@ -26,7 +26,7 @@ beforeAll(async () => {
 }, 60000)
 
 afterAll(async () => {
-  await ProductModel.deleteMany({ sku: { $in: ['RS-VASE-001', 'S'] } })
+  await ProductModel.deleteMany({ sku: { $in: ['RS-VASE-001', 'S', 'RS-BULK-TEA01', 'RS-BULK-MUG01'] } })
   await mongoose.disconnect()
   if (mongo) await mongo.stop()
 })
@@ -167,3 +167,198 @@ describe('Admin Product Add/Edit Flow', () => {
     expect(response.body.message).toMatch(/(name|slug|price|stock|sku)/)
   })
 })
+
+describe('Admin Bulk Product Import Flow', () => {
+  let bulkUploadedImageRef = ''
+
+  it('Requires admin authentication for bulk endpoints', async () => {
+    const uploadRes = await supertest(app)
+      .post('/api/admin/products/bulk-upload-image')
+      .attach('images', validJpegBuffer, 'tea.jpg')
+    expect(uploadRes.status).toBe(401)
+
+    const importRes = await supertest(app)
+      .post('/api/admin/products/bulk-import')
+      .send({ products: [] })
+    expect(importRes.status).toBe(401)
+  })
+
+  it('Validates bulk photo uploads (rejects empty or invalid formats, accepts valid)', async () => {
+    // 1. Zero files
+    const emptyRes = await supertest(app)
+      .post('/api/admin/products/bulk-upload-image')
+      .set('Authorization', `Bearer ${env.ADMIN_API_TOKEN}`)
+    expect(emptyRes.status).toBe(400)
+    expect(emptyRes.body.code).toBe('NO_FILES')
+
+    // 2. Invalid file (plain text instead of image)
+    const invalidRes = await supertest(app)
+      .post('/api/admin/products/bulk-upload-image')
+      .set('Authorization', `Bearer ${env.ADMIN_API_TOKEN}`)
+      .attach('images', Buffer.from('NOT AN IMAGE'), 'test.txt')
+    expect(invalidRes.status).toBe(400)
+    expect(invalidRes.body.code).toBe('UPLOAD_FAILED')
+
+    // 3. Valid image file
+    const validRes = await supertest(app)
+      .post('/api/admin/products/bulk-upload-image')
+      .set('Authorization', `Bearer ${env.ADMIN_API_TOKEN}`)
+      .attach('images', validJpegBuffer, 'RS-BULK-TEA01.jpg')
+    expect(validRes.status).toBe(200)
+    expect(validRes.body.success).toBe(true)
+    expect(validRes.body.uploaded).toHaveLength(1)
+    expect(validRes.body.uploaded[0].filename).toBe('RS-BULK-TEA01.jpg')
+    expect(validRes.body.uploaded[0].reference).toBeTruthy()
+
+    bulkUploadedImageRef = validRes.body.uploaded[0].reference
+  })
+
+  it('Rejects bulk import payload with duplicate SKUs in the same batch', async () => {
+    const duplicatePayload = {
+      products: [
+        {
+          sku: 'RS-BULK-TEA01',
+          name: 'Tea Strainer 1',
+          category: { name: 'Kitchen', slug: 'kitchen' },
+          price: 89,
+          stock: 20,
+          description: 'A test tea strainer item.',
+          images: [],
+        },
+        {
+          sku: 'RS-BULK-TEA01',
+          name: 'Tea Strainer Duplicate',
+          category: { name: 'Kitchen', slug: 'kitchen' },
+          price: 99,
+          stock: 10,
+          description: 'A duplicate tea strainer item.',
+          images: [],
+        },
+      ],
+    }
+
+    const response = await supertest(app)
+      .post('/api/admin/products/bulk-import')
+      .set('Authorization', `Bearer ${env.ADMIN_API_TOKEN}`)
+      .send(duplicatePayload)
+
+    expect(response.status).toBe(400)
+    expect(response.body.code).toBe('DUPLICATE_SKU_IN_PAYLOAD')
+  })
+
+  it('Rejects bulk import with invalid numbers (e.g. negative price or negative stock)', async () => {
+    const invalidPayload = {
+      products: [
+        {
+          sku: 'RS-BULK-INVALID',
+          name: 'Invalid Price Product',
+          category: { name: 'Kitchen', slug: 'kitchen' },
+          price: -25,
+          stock: 10,
+          description: 'Invalid price.',
+          images: [],
+        },
+      ],
+    }
+
+    const response = await supertest(app)
+      .post('/api/admin/products/bulk-import')
+      .set('Authorization', `Bearer ${env.ADMIN_API_TOKEN}`)
+      .send(invalidPayload)
+
+    expect(response.status).toBe(400)
+    expect(response.body.code).toBe('VALIDATION_ERROR')
+  })
+
+  it('Creates new products in bulk and updates existing products by SKU without duplicates', async () => {
+    // 1. Initial import of 2 products
+    const initialPayload = {
+      products: [
+        {
+          sku: 'RS-BULK-TEA01',
+          name: 'Stainless Steel Tea Filter',
+          category: { name: 'Kitchen', slug: 'kitchen' },
+          price: 89,
+          compareAtPrice: 120,
+          stock: 50,
+          shortDescription: 'Fine double-mesh stainless steel strainer.',
+          description: 'Durable food-grade stainless steel tea filter.',
+          images: [bulkUploadedImageRef],
+          active: true,
+          tone: 'mustard',
+        },
+        {
+          sku: 'RS-BULK-MUG01',
+          name: 'Heavy Duty Plastic Bath Mug',
+          category: { name: 'Everyday', slug: 'everyday' },
+          price: 49,
+          compareAtPrice: 75,
+          stock: 80,
+          shortDescription: '1-litre ribbed plastic mug.',
+          description: 'Made of virgin unbreakable polypropylene plastic.',
+          images: [],
+          active: true,
+          tone: 'terracotta',
+        },
+      ],
+    }
+
+    const createRes = await supertest(app)
+      .post('/api/admin/products/bulk-import')
+      .set('Authorization', `Bearer ${env.ADMIN_API_TOKEN}`)
+      .send(initialPayload)
+
+    expect(createRes.status).toBe(200)
+    expect(createRes.body.success).toBe(true)
+    expect(createRes.body.createdCount).toBe(2)
+    expect(createRes.body.updatedCount).toBe(0)
+
+    // Verify in MongoDB
+    const teaProd = await ProductModel.findOne({ sku: 'RS-BULK-TEA01' })
+    expect(teaProd).not.toBeNull()
+    expect(teaProd?.name).toBe('Stainless Steel Tea Filter')
+    expect(teaProd?.price).toBe(89)
+    expect(teaProd?.stock).toBe(50)
+    expect(teaProd?.slug).toBe('stainless-steel-tea-filter')
+    expect(teaProd?.images).toEqual([bulkUploadedImageRef])
+
+    const mugProd = await ProductModel.findOne({ sku: 'RS-BULK-MUG01' })
+    expect(mugProd).not.toBeNull()
+    expect(mugProd?.price).toBe(49)
+    expect(mugProd?.stock).toBe(80)
+
+    // 2. Re-import: update RS-BULK-TEA01 price/stock and preserve its images
+    const updatePayload = {
+      products: [
+        {
+          sku: 'RS-BULK-TEA01',
+          name: 'Stainless Steel Tea Filter - Updated',
+          category: { name: 'Kitchen', slug: 'kitchen' },
+          price: 99,
+          stock: 45,
+          description: 'Durable food-grade stainless steel tea filter with updated price.',
+          images: [], // No new images provided, should preserve existing images
+          active: true,
+        },
+      ],
+    }
+
+    const updateRes = await supertest(app)
+      .post('/api/admin/products/bulk-import')
+      .set('Authorization', `Bearer ${env.ADMIN_API_TOKEN}`)
+      .send(updatePayload)
+
+    expect(updateRes.status).toBe(200)
+    expect(updateRes.body.success).toBe(true)
+    expect(updateRes.body.createdCount).toBe(0)
+    expect(updateRes.body.updatedCount).toBe(1)
+
+    // Verify MongoDB: updated price/stock, preserved existing image
+    const updatedTea = await ProductModel.findOne({ sku: 'RS-BULK-TEA01' })
+    expect(updatedTea?.price).toBe(99)
+    expect(updatedTea?.stock).toBe(45)
+    expect(updatedTea?.name).toBe('Stainless Steel Tea Filter - Updated')
+    expect(updatedTea?.images).toEqual([bulkUploadedImageRef])
+  }, 30000)
+})
+

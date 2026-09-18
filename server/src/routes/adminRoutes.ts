@@ -41,6 +41,14 @@ export function createAdminRoutes(
     },
   })
 
+  const bulkImageUpload = multer({
+    storage: multer.memoryStorage(),
+    limits: {
+      fileSize: 5 * 1024 * 1024,
+      files: 10,
+    },
+  })
+
   const productImages = makeAdminProductController(productImageStorage)
 
   adminRoutes.get('/orders', listAdminOrders)
@@ -71,6 +79,8 @@ export function createAdminRoutes(
   )
 
   adminRoutes.patch('/products/:productId/stock', updateAdminStock)
+  adminRoutes.post('/products/bulk-upload-image', bulkImageUpload.array('images', 10), productImages.bulkUploadImages)
+  adminRoutes.post('/products/bulk-import', productImages.bulkImport)
 
   return adminRoutes
 }
