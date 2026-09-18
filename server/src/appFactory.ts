@@ -62,7 +62,7 @@ export function makeApp(
       if (!origin || isAllowedOrigin(origin)) return callback(null, true)
       return callback(new HttpError(403, 'CORS_ORIGIN_DENIED', 'Origin is not allowed.'))
     },
-    methods: ['GET', 'POST', 'PATCH', 'OPTIONS'],
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Authorization', 'Content-Type', 'Idempotency-Key', 'X-Request-Id'],
     exposedHeaders: ['X-Request-Id', 'RateLimit', 'RateLimit-Policy', 'RateLimit-Remaining', 'RateLimit-Reset'],
     maxAge: 86400,
