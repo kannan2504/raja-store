@@ -134,7 +134,7 @@ function SiteHeader() {
             <Link className="brand" to="/" aria-label="Raja Store Home">
               <span className="brand-mark">R</span>
               <span className="brand-text">
-                Raja<span className="brand-dot"> </span>Store
+                Raja&nbsp;&nbsp;<span className="brand-dot"> </span>Store
               </span>
             </Link>
             <nav className="desktop-nav" aria-label="Primary navigation">
@@ -304,7 +304,7 @@ function SiteFooter() {
           <Link className="brand" to="/" aria-label="Raja Store Home">
             <span className="brand-mark">R</span>
             <span className="brand-text">
-              raja<span className="brand-dot">.</span>store
+              Raja&nbsp;&nbsp;<span className="brand-dot"></span>Store
             </span>
           </Link>
           <p className="footer-tagline">Made with care in India</p>
