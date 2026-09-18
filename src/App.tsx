@@ -4,10 +4,13 @@ import {
   ArrowLeft,
   ArrowRight,
   Check,
+  ChevronLeft,
   ChevronRight,
   ClipboardList,
+  Clock,
   Copy,
   CreditCard,
+  Grid,
   MapPin,
   Menu,
   Moon,
@@ -20,8 +23,10 @@ import {
   Sparkles,
   Star,
   Sun,
+  Tag,
   Truck,
   X,
+  Zap,
 } from 'lucide-react'
 import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
 import { getProductCategories, getProducts } from './services/productService'
@@ -129,7 +134,7 @@ function SiteHeader() {
             <Link className="brand" to="/" aria-label="Raja Store Home">
               <span className="brand-mark">R</span>
               <span className="brand-text">
-                raja<span className="brand-dot"></span>store
+                Raja<span className="brand-dot"> </span>Store
               </span>
             </Link>
             <nav className="desktop-nav" aria-label="Primary navigation">
@@ -253,7 +258,7 @@ function SiteHeader() {
             </button>
           </div>
           <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-            © 2026 Raja Store • Handcrafted in India
+            © 2026 Raja Store • Chennai, India
           </div>
         </div>
       </aside>
@@ -473,7 +478,82 @@ function ProductCard({
 }
 
 /* ==========================================================================
-   HOMEPAGE (COMPACT HERO, CATEGORIES & ROWS)
+   FLIPKART-STYLE HORIZONTAL PRODUCT ROW
+   ========================================================================== */
+function FlipkartProductRow({
+  title,
+  subtitle,
+  viewAllLink,
+  products,
+  onAdd,
+  onOpen,
+}: {
+  title: string
+  subtitle?: string
+  viewAllLink: string
+  products: Product[]
+  onAdd: (product: Product) => void
+  onOpen: (slug: string) => void
+}) {
+  const rowRef = useRef<HTMLDivElement>(null)
+
+  const scroll = (direction: 'left' | 'right') => {
+    if (rowRef.current) {
+      rowRef.current.scrollBy({
+        left: direction === 'left' ? -380 : 380,
+        behavior: 'smooth',
+      })
+    }
+  }
+
+  return (
+    <section className="product-showcase-section flipkart-showcase-section" aria-label={title}>
+      <div className="showcase-header">
+        <div className="showcase-title-area">
+          <h2 className="showcase-title">{title}</h2>
+          {subtitle && <p className="showcase-subtitle">{subtitle}</p>}
+        </div>
+        <Link to={viewAllLink} className="view-all-link">
+          View All <ChevronRight size={16} />
+        </Link>
+      </div>
+
+      <div className="carousel-scroll-wrapper">
+        <button
+          type="button"
+          className="carousel-nav-btn prev"
+          onClick={() => scroll('left')}
+          aria-label={`Scroll ${title} left`}
+        >
+          <ChevronLeft size={20} />
+        </button>
+
+        <div className="product-row-carousel flipkart-product-carousel" ref={rowRef}>
+          {products.map((product) => (
+            <ProductCard
+              key={product.id}
+              product={product}
+              onAdd={onAdd}
+              onOpen={onOpen}
+            />
+          ))}
+        </div>
+
+        <button
+          type="button"
+          className="carousel-nav-btn next"
+          onClick={() => scroll('right')}
+          aria-label={`Scroll ${title} right`}
+        >
+          <ChevronRight size={20} />
+        </button>
+      </div>
+    </section>
+  )
+}
+
+/* ==========================================================================
+   HOMEPAGE (COMPACT HERO, DYNAMIC CATEGORIES & FLIPKART-STYLE ROWS)
    ========================================================================== */
 function HomePage() {
   const products = useCatalog()
@@ -486,28 +566,144 @@ function HomePage() {
 
   const categories = useMemo(() => getProductCategories(products), [products])
 
-  const bestSellers = useMemo(
-    () => products.filter((p) => p.isBestSeller),
-    [products]
-  )
-  const newArrivals = useMemo(
-    () => products.filter((p) => p.isNew),
-    [products]
-  )
+  const homeSections = useMemo(() => {
+    if (products.length === 0) return []
 
-  // Specific category groups based on existing data
-  const kitchenProducts = useMemo(
-    () => products.filter((p) => p.category.slug === 'kitchen'),
-    [products]
-  )
-  const homeProducts = useMemo(
-    () => products.filter((p) => p.category.slug === 'home'),
-    [products]
-  )
-  const everydayProducts = useMemo(
-    () => products.filter((p) => p.category.slug === 'everyday'),
-    [products]
-  )
+    const sections: Array<{
+      id: string
+      title: string
+      subtitle: string
+      viewAllLink: string
+      products: Product[]
+    }> = []
+
+    const usedCategorySlugs = new Set<string>()
+
+    // Helper to find category matching keywords in slug or name
+    const findCategory = (keywords: string[]) => {
+      return categories.find(
+        (c) =>
+          !usedCategorySlugs.has(c.slug) &&
+          keywords.some(
+            (k) =>
+              c.slug.toLowerCase().includes(k) ||
+              c.name.toLowerCase().includes(k)
+          )
+      )
+    }
+
+    // 1. Kitchen Essentials
+    const kitchenCat = findCategory(['kitchen', 'cook', 'utensil', 'tableware'])
+    if (kitchenCat) {
+      usedCategorySlugs.add(kitchenCat.slug)
+      const items = products.filter((p) => p.category.slug === kitchenCat.slug)
+      if (items.length > 0) {
+        sections.push({
+          id: 'kitchen-essentials',
+          title: kitchenCat.name.toLowerCase().includes('kitchen') ? 'Kitchen Essentials' : `${kitchenCat.name} Essentials`,
+          subtitle: 'Cookware, tools, containers & daily kitchen essentials',
+          viewAllLink: `/products?category=${kitchenCat.slug}`,
+          products: items,
+        })
+      }
+    }
+
+    // 2. Cleaning Essentials
+    const cleaningCat = findCategory(['clean', 'wash', 'mop', 'brush', 'detergent', 'housekeep', 'hygiene'])
+    if (cleaningCat) {
+      usedCategorySlugs.add(cleaningCat.slug)
+      const items = products.filter((p) => p.category.slug === cleaningCat.slug)
+      if (items.length > 0) {
+        sections.push({
+          id: 'cleaning-essentials',
+          title: 'Cleaning Essentials',
+          subtitle: 'Mops, wipers, scrubbers & daily cleaning solutions',
+          viewAllLink: `/products?category=${cleaningCat.slug}`,
+          products: items,
+        })
+      }
+    }
+
+    // 3. Home & Storage
+    const storageCat = findCategory(['storage', 'organizer', 'container', 'dabba', 'box', 'home', 'bath', 'plastic'])
+    if (storageCat) {
+      usedCategorySlugs.add(storageCat.slug)
+      const items = products.filter((p) => p.category.slug === storageCat.slug)
+      if (items.length > 0) {
+        sections.push({
+          id: 'home-storage',
+          title: 'Home & Storage',
+          subtitle: 'Organizers, racks, baskets & storage containers',
+          viewAllLink: `/products?category=${storageCat.slug}`,
+          products: items,
+        })
+      }
+    }
+
+    // 4. Everyday Essentials / New Arrivals
+    const everydayCat = findCategory(['everyday', 'essential', 'daily', 'wellness'])
+    if (everydayCat) {
+      usedCategorySlugs.add(everydayCat.slug)
+      const items = products.filter((p) => p.category.slug === everydayCat.slug)
+      if (items.length > 0) {
+        sections.push({
+          id: 'everyday-essentials',
+          title: 'Everyday Essentials',
+          subtitle: 'Affordable daily necessities for your household',
+          viewAllLink: `/products?category=${everydayCat.slug}`,
+          products: items,
+        })
+      }
+    }
+
+    // Fill up to 4 sections from other actual catalog categories if any slot is open
+    for (const cat of categories) {
+      if (sections.length >= 4) break
+      if (usedCategorySlugs.has(cat.slug)) continue
+      const items = products.filter((p) => p.category.slug === cat.slug)
+      if (items.length > 0) {
+        usedCategorySlugs.add(cat.slug)
+        sections.push({
+          id: `cat-${cat.slug}`,
+          title: cat.name,
+          subtitle: `Quality ${cat.name.toLowerCase()} at affordable prices`,
+          viewAllLink: `/products?category=${cat.slug}`,
+          products: items,
+        })
+      }
+    }
+
+    // If still under 4 sections, add New Arrivals
+    if (sections.length < 4) {
+      const newItems = products.filter((p) => p.isNew)
+      if (newItems.length > 0 && !sections.some((s) => s.id === 'new-arrivals')) {
+        sections.push({
+          id: 'new-arrivals',
+          title: 'New Arrivals / Everyday Essentials',
+          subtitle: 'Freshly added everyday household items',
+          viewAllLink: '/products?sort=newest',
+          products: newItems,
+        })
+      }
+    }
+
+    // If still under 4 sections, add Best Sellers / Popular Essentials
+    if (sections.length < 4) {
+      const bestItems = products.filter((p) => p.isBestSeller)
+      if (bestItems.length > 0 && !sections.some((s) => s.id === 'best-sellers')) {
+        sections.push({
+          id: 'best-sellers',
+          title: 'Popular Everyday Essentials',
+          subtitle: 'Top-rated household essentials for everyday needs',
+          viewAllLink: '/products?sort=featured',
+          products: bestItems,
+        })
+      }
+    }
+
+    // Return maximum 4 sections, ensuring non-empty
+    return sections.filter((s) => s.products.length > 0).slice(0, 4)
+  }, [products, categories])
 
   return (
     <Layout>
@@ -516,202 +712,91 @@ function HomePage() {
         <section className="home-hero-banner" aria-label="Hero promotion">
           <div className="hero-banner-content">
             <div className="hero-pill">
-              <Sparkles size={12} /> Indian Craft Heritage
+              <Zap size={12} /> Fast Delivery Around Chennai
             </div>
             <h1>
-              Authentic Goods,<br />
-              <em>chosen well.</em>
+              Everyday Essentials,<br />
+              <em>Delivered Fast.</em>
             </h1>
             <p className="hero-banner-desc">
-              Small-batch handcrafted essentials for peaceful mornings, shared meals, and everyday rituals.
+              Kitchen, cleaning and household essentials at affordable prices.
             </p>
+
+            <div className="hero-delivery-callout">
+              <Clock size={16} />
+              <span>
+                <strong>Fast Delivery Around Chennai:</strong> Eligible local orders may arrive within 12 hours after dispatch.
+              </span>
+            </div>
+
             <button className="hero-cta-btn" onClick={() => navigate('/products')}>
-              Shop the Collection <ArrowRight size={16} />
+              Shop Now <ArrowRight size={16} />
             </button>
           </div>
           <div className="hero-banner-media">
             <img
-              src="https://images.unsplash.com/photo-1604014237800-1c9102c219da?auto=format&fit=crop&w=900&q=85"
-              alt="Warm Indian interior with handcrafted living essentials"
+              src="https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=900&q=85"
+              alt="Everyday kitchen and household essentials at Raja Store"
             />
           </div>
         </section>
 
-        {/* Category Quick Access Chips */}
-        <section className="category-quick-bar" aria-label="Browse by category">
-          <div className="quick-bar-heading">
-            <h3>Explore by Category</h3>
-            <Link to="/products" className="view-all-link">
-              View All <ChevronRight size={15} />
-            </Link>
-          </div>
-          <div className="category-chips-row">
-            <button
-              className="category-chip"
-              onClick={() => navigate('/products')}
-            >
-              All Items ({products.length})
-            </button>
-            {categories.map((cat) => (
+        {/* Category Quick Access Bar */}
+        {categories.length > 0 && (
+          <section className="category-quick-bar" aria-label="Browse by category">
+            <div className="quick-bar-heading">
+              <h3>Shop by Category</h3>
+              <Link to="/products" className="view-all-link">
+                View All Items ({products.length}) <ChevronRight size={15} />
+              </Link>
+            </div>
+            <div className="category-chips-row">
               <button
-                key={cat.slug}
                 className="category-chip"
-                onClick={() => navigate(`/products?category=${cat.slug}`)}
+                onClick={() => navigate('/products')}
               >
-                {cat.name}
+                <Grid size={14} />
+                <span>All Items ({products.length})</span>
               </button>
-            ))}
-          </div>
-        </section>
-
-        {/* Section 1: Best Sellers Row */}
-        {bestSellers.length > 0 && (
-          <section className="product-showcase-section" aria-label="Best Sellers">
-            <div className="showcase-header">
-              <div className="showcase-title-area">
-                <h2 className="showcase-title">
-                  <Star size={20} fill="#d97706" color="#d97706" /> Best Sellers
-                </h2>
-                <p className="showcase-subtitle">Our most popular handcrafted pieces loved across India</p>
-              </div>
-              <Link to="/products?sort=featured" className="view-all-link">
-                View All <ChevronRight size={16} />
-              </Link>
-            </div>
-            <div className="product-row-carousel">
-              {bestSellers.map((product) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  onAdd={handleAdd}
-                  onOpen={(slug) => navigate(`/product/${slug}`)}
-                />
-              ))}
+              {categories.map((cat) => {
+                const count = products.filter((p) => p.category.slug === cat.slug).length
+                return (
+                  <button
+                    key={cat.slug}
+                    className="category-chip"
+                    onClick={() => navigate(`/products?category=${cat.slug}`)}
+                  >
+                    <span>{cat.name}</span>
+                    <span className="chip-count">({count})</span>
+                  </button>
+                )
+              })}
             </div>
           </section>
         )}
 
-        {/* Section 2: New Arrivals Row */}
-        {newArrivals.length > 0 && (
-          <section className="product-showcase-section" aria-label="New Arrivals">
-            <div className="showcase-header">
-              <div className="showcase-title-area">
-                <h2 className="showcase-title">
-                  <Sparkles size={20} color="var(--color-primary)" /> New Arrivals
-                </h2>
-                <p className="showcase-subtitle">Fresh additions to our curated everyday collection</p>
-              </div>
-              <Link to="/products?sort=newest" className="view-all-link">
-                View All <ChevronRight size={16} />
-              </Link>
-            </div>
-            <div className="product-row-carousel">
-              {newArrivals.map((product) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  onAdd={handleAdd}
-                  onOpen={(slug) => navigate(`/product/${slug}`)}
-                />
-              ))}
-            </div>
-          </section>
-        )}
+        {/* Flipkart-Style 4 Product Horizontal Rows */}
+        {homeSections.map((section) => (
+          <FlipkartProductRow
+            key={section.id}
+            title={section.title}
+            subtitle={section.subtitle}
+            viewAllLink={section.viewAllLink}
+            products={section.products}
+            onAdd={handleAdd}
+            onOpen={(slug) => navigate(`/product/${slug}`)}
+          />
+        ))}
 
-        {/* Section 3: Kitchen Collection */}
-        {kitchenProducts.length > 0 && (
-          <section className="product-showcase-section" aria-label="Kitchen Essentials">
-            <div className="showcase-header">
-              <div className="showcase-title-area">
-                <h2 className="showcase-title">Kitchen Essentials</h2>
-                <p className="showcase-subtitle">Traditional brass, storage, and enduring tableware</p>
-              </div>
-              <Link to="/products?category=kitchen" className="view-all-link">
-                View All <ChevronRight size={16} />
-              </Link>
-            </div>
-            <div className="product-row-carousel">
-              {kitchenProducts.map((product) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  onAdd={handleAdd}
-                  onOpen={(slug) => navigate(`/product/${slug}`)}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Section 4: Home & Decor */}
-        {homeProducts.length > 0 && (
-          <section className="product-showcase-section" aria-label="Handcrafted Home">
-            <div className="showcase-header">
-              <div className="showcase-title-area">
-                <h2 className="showcase-title">Handcrafted for Home</h2>
-                <p className="showcase-subtitle">Textiles, ceramics, and warm accents for living spaces</p>
-              </div>
-              <Link to="/products?category=home" className="view-all-link">
-                View All <ChevronRight size={16} />
-              </Link>
-            </div>
-            <div className="product-row-carousel">
-              {homeProducts.map((product) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  onAdd={handleAdd}
-                  onOpen={(slug) => navigate(`/product/${slug}`)}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Section 5: Everyday Living */}
-        {everydayProducts.length > 0 && (
-          <section className="product-showcase-section" aria-label="Everyday Living">
-            <div className="showcase-header">
-              <div className="showcase-title-area">
-                <h2 className="showcase-title">Everyday Living</h2>
-                <p className="showcase-subtitle">Natural fibers and thoughtful carries for daily journeys</p>
-              </div>
-              <Link to="/products?category=everyday" className="view-all-link">
-                View All <ChevronRight size={16} />
-              </Link>
-            </div>
-            <div className="product-row-carousel">
-              {everydayProducts.map((product) => (
-                <ProductCard
-                  key={product.id}
-                  product={product}
-                  onAdd={handleAdd}
-                  onOpen={(slug) => navigate(`/product/${slug}`)}
-                />
-              ))}
-            </div>
-          </section>
-        )}
-
-        {/* Trust Value Strip */}
+        {/* Delivery / Trust Value Strip */}
         <section className="home-value-strip" aria-label="Why shop with us">
-          <div className="home-value-item">
-            <div className="value-item-icon">
-              <ShieldCheck size={22} />
-            </div>
-            <div className="value-item-text">
-              <h4>100% Authentic</h4>
-              <p>Hand-finished by Indian artisans</p>
-            </div>
-          </div>
-
           <div className="home-value-item">
             <div className="value-item-icon">
               <Truck size={22} />
             </div>
             <div className="value-item-text">
-              <h4>Safe Delivery</h4>
-              <p>Carefully packed & tracked parcel</p>
+              <h4>Fast Chennai Delivery</h4>
+              <p>Eligible local Chennai orders may arrive within 12 hours after dispatch.</p>
             </div>
           </div>
 
@@ -720,18 +805,28 @@ function HomePage() {
               <CreditCard size={22} />
             </div>
             <div className="value-item-text">
-              <h4>COD & UPI Available</h4>
-              <p>Flexible and safe payment options</p>
+              <h4>COD &amp; UPI</h4>
+              <p>Cash on Delivery and easy instant UPI payments supported.</p>
             </div>
           </div>
 
           <div className="home-value-item">
             <div className="value-item-icon">
-              <RotateCcw size={22} />
+              <ShieldCheck size={22} />
             </div>
             <div className="value-item-text">
-              <h4>Easy 7-Day Support</h4>
-              <p>Simple returns & customer care</p>
+              <h4>Secure Ordering</h4>
+              <p>Instant SMS/Email alerts and live order tracking anytime.</p>
+            </div>
+          </div>
+
+          <div className="home-value-item">
+            <div className="value-item-icon">
+              <Tag size={22} />
+            </div>
+            <div className="value-item-text">
+              <h4>Everyday Affordable Products</h4>
+              <p>Everyday kitchen, cleaning &amp; home essentials at pocket-friendly prices.</p>
             </div>
           </div>
         </section>
@@ -798,7 +893,7 @@ function ProductsPage() {
             <div>
               <h1>{searchQuery ? `Results for “${searchQuery}”` : 'Shop Collection'}</h1>
               <span className="catalog-item-count">
-                Showing {visibleProducts.length} handcrafted items
+                Showing {visibleProducts.length} items
               </span>
             </div>
 
@@ -842,8 +937,8 @@ function ProductsPage() {
 
         {products.length === 0 ? (
           <div className="state-box">
-            <h3>Loading Collection...</h3>
-            <p>Fetching the handcrafted edit from Raja Store.</p>
+            <h3>Loading Products...</h3>
+            <p>Fetching everyday essentials from Raja Store.</p>
           </div>
         ) : visibleProducts.length === 0 ? (
           <div className="state-box">
@@ -1080,7 +1175,7 @@ function ProductPage() {
             <div className="section-heading-row">
               <div>
                 <h2 className="section-title">You May Also Like</h2>
-                <p className="section-subtitle">Complementary handcrafted pieces from our collection</p>
+                <p className="section-subtitle">More everyday essentials from our collection</p>
               </div>
               <Link to={`/products?category=${product.category.slug}`} className="view-more-link">
                 Explore {product.category.name} <ChevronRight size={15} />
@@ -1190,7 +1285,7 @@ function CartPage() {
           <div className="state-box">
             <ShoppingBag size={42} style={{ color: 'var(--color-primary)', margin: '0 auto 16px' }} />
             <h3>Your shopping bag is empty</h3>
-            <p>Discover our range of handcrafted everyday goods.</p>
+            <p>Discover our range of everyday household essentials.</p>
             <button className="hero-cta-btn" onClick={() => navigate('/products')}>
               Start Shopping <ArrowRight size={16} />
             </button>
