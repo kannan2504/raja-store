@@ -284,7 +284,7 @@ export function validateAndMatchBulkProducts(
       isBestSeller: isBestSellerRaw === 'true' || isBestSellerRaw === '1' || isBestSellerRaw === 'yes',
       isNew: isNewRaw === 'true' || isNewRaw === '1' || isNewRaw === 'yes',
       tone: tone || undefined,
-      slug: slugRaw ? toSlug(slugRaw) : undefined,
+      slug: slugRaw ? toSlug(slugRaw) : (name ? toSlug(name) : undefined),
       matchedFiles,
       errors,
       isExisting,

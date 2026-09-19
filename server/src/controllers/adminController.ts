@@ -64,6 +64,24 @@ function toSlug(value: string): string {
     .replace(/^-+|-+$/g, '')
 }
 
+export async function resolveUniqueSlug(baseSlug: string, excludeProductId?: string): Promise<string> {
+  const cleanBase = toSlug(baseSlug) || 'product'
+  let candidate = cleanBase
+  let counter = 2
+  while (true) {
+    const filter: Record<string, unknown> = { slug: candidate }
+    if (excludeProductId) {
+      filter.productId = { $ne: excludeProductId }
+    }
+    const exists = await ProductModel.exists(filter)
+    if (!exists) {
+      return candidate
+    }
+    candidate = `${cleanBase}-${counter}`
+    counter++
+  }
+}
+
 export function makeAdminProductController(storage: ProductImageStorage) { return {
 	create: async (request: Request, response: Response) => { let uploaded: string[] = []; try { const parts = multipartProductBody(request); uploaded = await Promise.all(parts.files.map((file) => storage.upload(file))); const byIndex = new Map(uploaded.map((reference, index) => [`file:${index}`, reference])); const images = (parts.imageOrder ?? uploaded.map((_, index) => `file:${index}`)).map((token: string) => byIndex.get(token)).filter((value: string | undefined): value is string => Boolean(value)); const input = adminProductSchema.parse({ ...parts.body, images }); if (input.images.length < 1 || input.images.length > 5) throw new Error('Product requires 1 to 5 images.'); const product = await ProductModel.create({ ...input, productId: `prod_${randomUUID().replaceAll('-', '').slice(0, 16)}` }); response.status(201).json({ success: true, product: { productId: product.productId, name: product.name, sku: product.sku, price: product.price, stock: product.stock, active: product.active, images: product.images } }) } catch (error) { await Promise.all(uploaded.map((image) => storage.delete(image))); if (error instanceof ZodError || (error instanceof Error && error.message === 'Product requires 1 to 5 images.')) return response.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: formatValidationError(error, 'Please check the product details.') }); if ((error as { code?: number }).code === 11000) return response.status(409).json({ success: false, code: 'PRODUCT_ALREADY_EXISTS', message: 'A product with this slug or SKU already exists.' }); throw error } },
 	update: async (request: Request, response: Response) => { let uploaded: string[] = []; try { const parts = multipartProductBody(request); const existing = await ProductModel.findOne({ productId: request.params.productId }); if (!existing) return response.status(404).json({ success: false, code: 'PRODUCT_NOT_FOUND', message: 'Product not found.' }); uploaded = await Promise.all(parts.files.map((file) => storage.upload(file))); const byIndex = new Map(uploaded.map((reference, index) => [`file:${index}`, reference])); const existingImages = (existing.images ?? []).filter((img): img is string => typeof img === 'string'); const orderedTokens = parts.imageOrder ?? [...existingImages.map((image) => `ref:${image}`), ...uploaded.map((_, index) => `file:${index}`)]; const images = orderedTokens.map((token: string) => token.startsWith('ref:') ? token.slice(4) : byIndex.get(token)).filter(isValidProductImageReference); if (images.length > 5) throw new Error('A product can have at most 5 images.'); const input = adminProductPatchSchema.parse({ ...parts.body, images }); const product = await ProductModel.findOneAndUpdate({ productId: request.params.productId }, { $set: input }, { new: true, runValidators: true }); const removed = existingImages.filter((image) => !images.includes(image)); await Promise.all(removed.map((image: string) => storage.delete(image))); response.json({ success: true, product: { productId: product!.productId, name: product!.name, sku: product!.sku, price: product!.price, stock: product!.stock, active: product!.active, images: product!.images } }) } catch (error) { await Promise.all(uploaded.map((image) => storage.delete(image))); if (error instanceof ZodError || (error instanceof Error && (error.message.includes('images') || error.message.includes('Product requires')))) return response.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: formatValidationError(error, 'Please check the product images.') }); if ((error as { code?: number }).code === 11000) return response.status(409).json({ success: false, code: 'PRODUCT_ALREADY_EXISTS', message: 'A product with this slug or SKU already exists.' }); throw error } },
@@ -122,7 +140,6 @@ export function makeAdminProductController(storage: ProductImageStorage) { retur
 
 		for (const item of products) {
 			const existing = await ProductModel.findOne({ sku: item.sku })
-			const baseSlug = toSlug(item.slug || item.name)
 
 			if (existing) {
 				const updateData: Record<string, unknown> = {
@@ -143,15 +160,23 @@ export function makeAdminProductController(storage: ProductImageStorage) { retur
 				if (item.variants && item.variants.length > 0) updateData.variants = item.variants
 				if (item.images && item.images.length > 0) updateData.images = item.images
 
+				const nameChanged = item.name.trim() !== existing.name.trim()
+				const explicitSlug = item.slug ? toSlug(item.slug) : ''
+				const hasCustomExplicitSlug = Boolean(
+					explicitSlug && explicitSlug !== toSlug(item.name) && explicitSlug !== existing.slug
+				)
+
+				if (nameChanged || hasCustomExplicitSlug) {
+					const targetBaseSlug = explicitSlug || toSlug(item.name) || 'product'
+					const finalSlug = await resolveUniqueSlug(targetBaseSlug, existing.productId)
+					updateData.slug = finalSlug
+				}
+
 				await ProductModel.updateOne({ productId: existing.productId }, { $set: updateData })
 				updatedCount++
 			} else {
-				let finalSlug = baseSlug
-				let counter = 1
-				while (await ProductModel.exists({ slug: finalSlug })) {
-					finalSlug = `${baseSlug}-${toSlug(item.sku)}${counter > 1 ? `-${counter}` : ''}`
-					counter++
-				}
+				const baseSlug = toSlug(item.slug || item.name) || 'product'
+				const finalSlug = await resolveUniqueSlug(baseSlug)
 
 				const productId = `prod_${randomUUID().replaceAll('-', '').slice(0, 16)}`
 				await ProductModel.create({

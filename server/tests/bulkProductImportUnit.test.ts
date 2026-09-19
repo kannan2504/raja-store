@@ -97,4 +97,36 @@ RS-BAT-MUG01,Plastic Mug,Everyday,49,80,"1-litre plastic mug with ""comfort"" gr
     // Cannot import due to errors
     expect(report.canImport).toBe(false)
   })
+
+  it('derives slug from product name when slug column is omitted, and preserves explicit slug when provided', () => {
+    const rawRows = [
+      {
+        sku: 'RS-AUTO-01',
+        name: 'Brass Spice Container Set',
+        category: 'Kitchen',
+        price: '499',
+        stock: '10',
+        description: 'Traditional container set.',
+        // No slug column provided
+      },
+      {
+        sku: 'RS-EXP-02',
+        name: 'Handwoven Cotton Throw',
+        slug: 'custom-cotton-throw',
+        category: 'Home',
+        price: '799',
+        stock: '15',
+        description: 'Cotton throw blanket.',
+      },
+    ]
+
+    const report = validateAndMatchBulkProducts(rawRows, [], [])
+    expect(report.products).toHaveLength(2)
+
+    // Derived from name
+    expect(report.products[0].slug).toBe('brass-spice-container-set')
+
+    // Preserved explicit slug
+    expect(report.products[1].slug).toBe('custom-cotton-throw')
+  })
 })

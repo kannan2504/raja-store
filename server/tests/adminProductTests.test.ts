@@ -26,7 +26,21 @@ beforeAll(async () => {
 }, 60000)
 
 afterAll(async () => {
-  await ProductModel.deleteMany({ sku: { $in: ['RS-VASE-001', 'S', 'RS-BULK-TEA01', 'RS-BULK-MUG01'] } })
+  await ProductModel.deleteMany({
+    sku: {
+      $in: [
+        'RS-VASE-001',
+        'S',
+        'RS-BULK-TEA01',
+        'RS-BULK-MUG01',
+        'RS-SLUG-NEW',
+        'RS-SLUG-DUP1',
+        'RS-SLUG-DUP2',
+        'RS-SLUG-DUP3',
+        'RS-SLUG-EXP',
+      ],
+    },
+  })
   await mongoose.disconnect()
   if (mongo) await mongo.stop()
 })
@@ -361,4 +375,226 @@ describe('Admin Bulk Product Import Flow', () => {
     expect(updatedTea?.images).toEqual([bulkUploadedImageRef])
   }, 30000)
 })
+
+describe('Bulk Import Slug Generation and Collision Resolution', () => {
+  it('new product slug generation: derives slug from product name when omitted', async () => {
+    const payload = {
+      products: [
+        {
+          sku: 'RS-SLUG-NEW',
+          name: 'Stainless Kitchen Scissors',
+          category: { name: 'Kitchen', slug: 'kitchen' },
+          price: 249,
+          stock: 30,
+          description: 'High quality stainless kitchen shears.',
+          images: [],
+          active: true,
+        },
+      ],
+    }
+
+    const res = await supertest(app)
+      .post('/api/admin/products/bulk-import')
+      .set('Authorization', `Bearer ${env.ADMIN_API_TOKEN}`)
+      .send(payload)
+
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.createdCount).toBe(1)
+
+    const product = await ProductModel.findOne({ sku: 'RS-SLUG-NEW' })
+    expect(product).not.toBeNull()
+    expect(product?.name).toBe('Stainless Kitchen Scissors')
+    expect(product?.slug).toBe('stainless-kitchen-scissors')
+  })
+
+  it('existing SKU + changed name: updates slug to match new product name', async () => {
+    const payload = {
+      products: [
+        {
+          sku: 'RS-SLUG-NEW',
+          name: 'Stainless Kitchen Scissors Deluxe',
+          category: { name: 'Kitchen', slug: 'kitchen' },
+          price: 299,
+          stock: 25,
+          description: 'High quality stainless kitchen shears deluxe edition.',
+          images: [],
+          active: true,
+        },
+      ],
+    }
+
+    const res = await supertest(app)
+      .post('/api/admin/products/bulk-import')
+      .set('Authorization', `Bearer ${env.ADMIN_API_TOKEN}`)
+      .send(payload)
+
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.updatedCount).toBe(1)
+    expect(res.body.createdCount).toBe(0)
+
+    const product = await ProductModel.findOne({ sku: 'RS-SLUG-NEW' })
+    expect(product?.name).toBe('Stainless Kitchen Scissors Deluxe')
+    expect(product?.slug).toBe('stainless-kitchen-scissors-deluxe')
+  })
+
+  it('unchanged name: retains existing slug when name is unchanged', async () => {
+    const payload = {
+      products: [
+        {
+          sku: 'RS-SLUG-NEW',
+          name: 'Stainless Kitchen Scissors Deluxe',
+          category: { name: 'Kitchen', slug: 'kitchen' },
+          price: 349,
+          stock: 20,
+          description: 'High quality stainless kitchen shears deluxe edition with new price.',
+          images: [],
+          active: true,
+        },
+      ],
+    }
+
+    const res = await supertest(app)
+      .post('/api/admin/products/bulk-import')
+      .set('Authorization', `Bearer ${env.ADMIN_API_TOKEN}`)
+      .send(payload)
+
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.updatedCount).toBe(1)
+    expect(res.body.createdCount).toBe(0)
+
+    const product = await ProductModel.findOne({ sku: 'RS-SLUG-NEW' })
+    expect(product?.price).toBe(349)
+    expect(product?.name).toBe('Stainless Kitchen Scissors Deluxe')
+    expect(product?.slug).toBe('stainless-kitchen-scissors-deluxe')
+  })
+
+  it('duplicate product names / slug collision: suffixes with -2, -3 deterministically without overwrite', async () => {
+    const payload = {
+      products: [
+        {
+          sku: 'RS-SLUG-DUP1',
+          name: 'Heavy Duty Brass Tongs',
+          category: { name: 'Kitchen', slug: 'kitchen' },
+          price: 199,
+          stock: 15,
+          description: 'Brass serving tongs.',
+          images: [],
+          active: true,
+        },
+        {
+          sku: 'RS-SLUG-DUP2',
+          name: 'Heavy Duty Brass Tongs',
+          category: { name: 'Kitchen', slug: 'kitchen' },
+          price: 219,
+          stock: 10,
+          description: 'Another variation of brass serving tongs.',
+          images: [],
+          active: true,
+        },
+        {
+          sku: 'RS-SLUG-DUP3',
+          name: 'Heavy Duty Brass Tongs',
+          category: { name: 'Kitchen', slug: 'kitchen' },
+          price: 239,
+          stock: 5,
+          description: 'A third variation of brass serving tongs.',
+          images: [],
+          active: true,
+        },
+      ],
+    }
+
+    const res = await supertest(app)
+      .post('/api/admin/products/bulk-import')
+      .set('Authorization', `Bearer ${env.ADMIN_API_TOKEN}`)
+      .send(payload)
+
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.createdCount).toBe(3)
+
+    const prod1 = await ProductModel.findOne({ sku: 'RS-SLUG-DUP1' })
+    const prod2 = await ProductModel.findOne({ sku: 'RS-SLUG-DUP2' })
+    const prod3 = await ProductModel.findOne({ sku: 'RS-SLUG-DUP3' })
+
+    expect(prod1?.slug).toBe('heavy-duty-brass-tongs')
+    expect(prod2?.slug).toBe('heavy-duty-brass-tongs-2')
+    expect(prod3?.slug).toBe('heavy-duty-brass-tongs-3')
+
+    expect(prod1?.sku).toBe('RS-SLUG-DUP1')
+    expect(prod2?.sku).toBe('RS-SLUG-DUP2')
+    expect(prod3?.sku).toBe('RS-SLUG-DUP3')
+  })
+
+  it('explicit slug if currently supported: preserves explicitly supplied slug', async () => {
+    const payload = {
+      products: [
+        {
+          sku: 'RS-SLUG-EXP',
+          name: 'Traditional Mortar and Pestle',
+          slug: 'custom-brass-mortar',
+          category: { name: 'Kitchen', slug: 'kitchen' },
+          price: 499,
+          stock: 12,
+          description: 'Hand-carved mortar and pestle.',
+          images: [],
+          active: true,
+        },
+      ],
+    }
+
+    const res = await supertest(app)
+      .post('/api/admin/products/bulk-import')
+      .set('Authorization', `Bearer ${env.ADMIN_API_TOKEN}`)
+      .send(payload)
+
+    expect(res.status).toBe(200)
+    expect(res.body.success).toBe(true)
+    expect(res.body.createdCount).toBe(1)
+
+    const product = await ProductModel.findOne({ sku: 'RS-SLUG-EXP' })
+    expect(product?.slug).toBe('custom-brass-mortar')
+  })
+
+  it('no duplicate products created: re-importing existing SKU updates without creating duplicates', async () => {
+    const initialCount = await ProductModel.countDocuments({ sku: 'RS-SLUG-EXP' })
+    expect(initialCount).toBe(1)
+
+    const payload = {
+      products: [
+        {
+          sku: 'RS-SLUG-EXP',
+          name: 'Traditional Mortar and Pestle',
+          slug: 'custom-brass-mortar',
+          category: { name: 'Kitchen', slug: 'kitchen' },
+          price: 549,
+          stock: 10,
+          description: 'Updated price for mortar and pestle.',
+          images: [],
+          active: true,
+        },
+      ],
+    }
+
+    const res = await supertest(app)
+      .post('/api/admin/products/bulk-import')
+      .set('Authorization', `Bearer ${env.ADMIN_API_TOKEN}`)
+      .send(payload)
+
+    expect(res.status).toBe(200)
+    expect(res.body.createdCount).toBe(0)
+    expect(res.body.updatedCount).toBe(1)
+
+    const finalCount = await ProductModel.countDocuments({ sku: 'RS-SLUG-EXP' })
+    expect(finalCount).toBe(1)
+
+    const updated = await ProductModel.findOne({ sku: 'RS-SLUG-EXP' })
+    expect(updated?.price).toBe(549)
+    expect(updated?.stock).toBe(10)
+  })
+})
+
 
