@@ -182,6 +182,27 @@ function SiteHeader() {
             </button>
           </div>
         </header>
+
+        {/* Mobile Search Bar - directly below main header row */}
+        <div className="mobile-search-bar">
+          <form className="mobile-search-form" onSubmit={handleSearch} role="search">
+            <button
+              type="submit"
+              className="mobile-search-submit"
+              aria-label="Search products"
+            >
+              <Search size={15} className="mobile-search-icon" />
+            </button>
+            <input
+              type="search"
+              className="mobile-search-input"
+              placeholder="Search products..."
+              value={searchVal}
+              onChange={(e) => setSearchVal(e.target.value)}
+              aria-label="Search collection"
+            />
+          </form>
+        </div>
       </div>
 
       {/* Mobile Navigation Drawer */}

@@ -386,6 +386,11 @@ img {
   pointer-events: none;
 }
 
+/* Mobile search bar container - hidden on desktop */
+.mobile-search-bar {
+  display: none;
+}
+
 /* ==========================================================================
    MOBILE NAVIGATION DRAWER
    ========================================================================== */
@@ -2498,18 +2503,76 @@ img {
 
 @media (max-width: 768px) {
   :root {
-    --header-height: 60px;
+    --header-height: 108px;
   }
   .desktop-nav,
-  .header-search-form {
+  .header-actions .header-search-form {
     display: none;
   }
   .mobile-menu-btn {
     display: inline-flex;
   }
   .site-header {
-    height: 60px;
+    height: 58px;
     padding: 0 16px;
+  }
+  .mobile-search-bar {
+    display: block;
+    padding: 0 16px 10px 16px;
+    max-width: 1280px;
+    margin: 0 auto;
+    width: 100%;
+    box-sizing: border-box;
+  }
+  .mobile-search-form {
+    position: relative;
+    display: flex;
+    align-items: center;
+    width: 100%;
+  }
+  .mobile-search-submit {
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: var(--radius-full);
+    z-index: 1;
+  }
+  .mobile-search-submit:hover,
+  .mobile-search-submit:focus-visible {
+    color: var(--color-primary);
+    outline: none;
+  }
+  .mobile-search-input {
+    width: 100%;
+    height: 40px;
+    padding: 0 14px 0 38px;
+    font-size: 14px;
+    background: var(--bg-input);
+    border: 1px solid var(--border-subtle);
+    border-radius: var(--radius-full);
+    color: var(--text-primary);
+    outline: none;
+    box-sizing: border-box;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+    -webkit-appearance: none;
+  }
+  .mobile-search-input:focus {
+    border-color: var(--border-focus);
+    box-shadow: 0 0 0 3px rgba(31, 107, 122, 0.12);
+  }
+  .mobile-search-icon {
+    pointer-events: none;
   }
   .home-container,
   .shop-page-wrapper,
@@ -2583,6 +2646,12 @@ img {
 }
 
 @media (max-width: 360px) {
+  .site-header {
+    padding: 0 12px;
+  }
+  .mobile-search-bar {
+    padding: 0 12px 10px 12px;
+  }
   .cart-delivery-banner {
     padding: 10px 12px;
   }
