@@ -56,13 +56,7 @@ function multipartProductBody(request: Request) {
     imageOrder,
   }
 }
-function toSlug(value: string): string {
-  return value
-    .toLowerCase()
-    .replace(/[''`]/g, '')
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-}
+import { toSlug } from '../utils/slug'
 
 export async function resolveUniqueSlug(baseSlug: string, excludeProductId?: string): Promise<string> {
   const cleanBase = toSlug(baseSlug) || 'product'

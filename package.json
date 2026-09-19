@@ -11,7 +11,8 @@
     "server:build": "tsc -p server/tsconfig.json",
     "server:start": "tsx server/src/server.ts",
     "test:server": "npm exec -- vitest run server/tests",
-    "seed": "tsx server/src/seed.ts"
+    "seed": "tsx server/src/seed.ts",
+    "migrate:slugs": "tsx server/src/scripts/migrateProductSlugs.ts"
   },
   "dependencies": {
     "@vitejs/plugin-react": "latest",
