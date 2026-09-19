@@ -10,13 +10,11 @@ import {
   updateAdminPayment,
   updateAdminStock,
   makeAdminProductController,
-  migrateProductSlugsAdmin,
 } from '../controllers/adminController'
 import { makeAdminProofController } from '../controllers/adminProofController'
 import { requireAdmin } from '../middleware/adminAuth'
 import { createProductImageStorage, type ProductImageStorage } from '../services/productImageStorage'
 import { createPaymentProofStorage, type PaymentProofStorage } from '../services/paymentProofStorage'
-import { env } from '../config/env'
 
 export function createAdminRoutes(
   paymentProofStorage: PaymentProofStorage = createPaymentProofStorage(),
@@ -84,20 +82,6 @@ export function createAdminRoutes(
   adminRoutes.delete('/products/:productId', productImages.deleteProduct)
   adminRoutes.post('/products/bulk-upload-image', bulkImageUpload.array('images', 10), productImages.bulkUploadImages)
   adminRoutes.post('/products/bulk-import', productImages.bulkImport)
-
-  // Temporary one-time slug migration endpoint (POST only, protected by requireAdmin)
-  const migrationRateLimit = rateLimit({
-    windowMs: 15 * 60 * 1000,
-    limit: env.NODE_ENV === 'test' ? 1000 : 5,
-    standardHeaders: true,
-    legacyHeaders: false,
-    message: {
-      success: false,
-      code: 'RATE_LIMITED',
-      message: 'Too many migration requests. Please try again later.',
-    },
-  })
-  adminRoutes.post('/migrate-product-slugs', migrationRateLimit, migrateProductSlugsAdmin)
 
   return adminRoutes
 }

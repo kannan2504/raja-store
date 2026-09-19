@@ -3,9 +3,8 @@ import { OrderModel } from '../models/orderDocument'
 import { ProductModel } from '../models/productDocument'
 import { randomUUID } from 'node:crypto'
 import { adminBulkImportSchema, adminProductPatchSchema, adminProductSchema, adminStockSchema } from '../validators/adminProduct'
-import { z, ZodError } from 'zod'
+import { ZodError } from 'zod'
 import { isValidProductImageReference, type ProductImageStorage } from '../services/productImageStorage'
-import { planSlugMigration, executeSlugMigration, formatMigrationSummary } from '../utils/slugMigration'
 
 export async function listAdminOrders(_request: Request, response: Response) { const orders = await OrderModel.find().sort({ createdAt: -1 }).limit(100).lean(); response.json({ success: true, orders: orders.map((order) => ({ orderId: order.orderId, customer: { fullName: order.customer?.fullName, phone: order.customer?.phone }, pricing: { total: order.pricing?.total }, payment: { method: order.payment?.method, status: order.payment?.status,   proofFileId: order.payment?.proofFileId ?? null }, orderStatus: order.orderStatus, notification: order.notification?.orderCreated, createdAt: order.createdAt })) }) }
 export async function getAdminOrder(request: Request, response: Response) { const order = await OrderModel.findOne({ orderId: request.params.orderId }).lean(); if (!order) return response.status(404).json({ success: false, code: 'ORDER_NOT_FOUND', message: 'Order not found.' }); const { trackingTokenHash: _trackingTokenHash, _id: _internalId, ...safeOrder } = order; response.json({ success: true, order: safeOrder }) }
@@ -217,93 +216,3 @@ export function makeAdminProductController(storage: ProductImageStorage) { retur
 	},
 } }
 export async function updateAdminStock(request: Request, response: Response) { const parsed = adminStockSchema.safeParse(request.body); if (!parsed.success) return response.status(400).json({ success: false, code: 'VALIDATION_ERROR', message: 'Stock must be a non-negative integer.' }); const product = await ProductModel.findOneAndUpdate({ productId: request.params.productId }, { $set: { stock: parsed.data.stock, updatedAt: new Date() } }, { new: true, runValidators: true }); if (!product) return response.status(404).json({ success: false, code: 'PRODUCT_NOT_FOUND', message: 'Product not found.' }); response.json({ success: true, product: { productId: product.productId, stock: product.stock } }) }
-
-const migrateSlugsBodySchema = z
-  .object({
-    apply: z.boolean().optional(),
-  })
-  .strict()
-
-/**
- * Temporary protected admin controller for executing product slug migration.
- * Default request (or apply !== true) is strictly DRY RUN.
- * Passing { apply: true } performs safe, 2-phase catalog slug migration.
- */
-export async function migrateProductSlugsAdmin(request: Request, response: Response) {
-  const parsed = migrateSlugsBodySchema.safeParse(request.body ?? {})
-  if (!parsed.success) {
-    return response.status(400).json({
-      success: false,
-      code: 'VALIDATION_ERROR',
-      message: 'Invalid request body. Only optional { "apply": boolean } is accepted.',
-    })
-  }
-
-  const rawProducts = await ProductModel.find({}, 'productId sku name slug').lean()
-  const plan = planSlugMigration(
-    rawProducts.map((p) => ({
-      productId: p.productId,
-      sku: p.sku,
-      name: p.name,
-      slug: p.slug,
-    }))
-  )
-
-  const proposedChanges = plan.items
-    .filter((item) => item.action === 'UPDATE')
-    .map((item) => ({
-      sku: item.sku,
-      name: item.name,
-      oldSlug: item.oldSlug,
-      newSlug: item.proposedSlug,
-    }))
-
-  const shouldApply = parsed.data.apply === true
-
-  if (!shouldApply) {
-    return response.json({
-      success: true,
-      applied: false,
-      totalChecked: plan.totalChecked,
-      totalProductsChecked: plan.totalChecked,
-      numberRequiringChanges: plan.toUpdateCount,
-      collisionCount: plan.collisionCount,
-      alreadyCorrectCount: plan.alreadyCorrectCount,
-      proposedChanges,
-      summary: formatMigrationSummary(plan, false),
-    })
-  }
-
-  if (!plan.isValid) {
-    return response.status(422).json({
-      success: false,
-      applied: false,
-      code: 'MIGRATION_VALIDATION_FAILED',
-      message: 'Migration plan contains duplicate or invalid slugs.',
-      errors: plan.errors,
-    })
-  }
-
-  const result = await executeSlugMigration(ProductModel, plan, { apply: true })
-  if (!result.success) {
-    return response.status(500).json({
-      success: false,
-      applied: false,
-      code: 'MIGRATION_EXECUTION_FAILED',
-      message: 'Failed to execute slug migration updates.',
-      errors: result.errors,
-    })
-  }
-
-  return response.json({
-    success: true,
-    applied: true,
-    totalChecked: plan.totalChecked,
-    totalProductsChecked: plan.totalChecked,
-    updatedCount: result.updatedCount,
-    collisionCount: plan.collisionCount,
-    alreadyCorrectCount: plan.alreadyCorrectCount,
-    proposedChanges,
-    summary: formatMigrationSummary(plan, true),
-  })
-}
