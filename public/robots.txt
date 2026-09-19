@@ -1,0 +1,11 @@
+User-agent: *
+Disallow: /admin
+Disallow: /cart
+Disallow: /checkout
+Disallow: /order-success/
+Disallow: /order-failure
+Disallow: /track-order
+Disallow: /my-orders
+Disallow: /dev/
+
+Sitemap: https://raja-store.vercel.app/sitemap.xml

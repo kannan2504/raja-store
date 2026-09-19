@@ -2,11 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { Check, Database, RefreshCw, X } from 'lucide-react'
 import { getDevelopmentDatabaseStatus, type DevelopmentStatus } from './services/developmentService'
 import { formatPrice } from './utils/format'
+import { useSEO } from './hooks/useSEO'
 
 function formatDate(value: string) { return new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value)) }
 function label(value: string) { return value.replaceAll('_', ' ') }
 
 export default function DevDatabasePage() {
+  useSEO({ title: 'Database Verification | Raja Store', noIndex: true })
   const [status, setStatus] = useState<DevelopmentStatus>()
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)

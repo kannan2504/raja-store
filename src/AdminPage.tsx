@@ -4,6 +4,7 @@ import { adminApi, type AdminOrder, type AdminProduct } from './services/adminSe
 import { formatPrice } from './utils/format'
 import { API_BASE_URL } from './config'
 import BulkImportModal from './components/BulkImportModal'
+import { useSEO } from './hooks/useSEO'
 
 /** Convert any string to a URL-safe slug that satisfies /^[a-z0-9]+(?:-[a-z0-9]+)*$/ */
 function toSlug(value: string): string {
@@ -20,6 +21,7 @@ type ImageEntry = { key: string; src: string; file?: File; reference?: string }
 const emptyDraft: ProductDraft = { name: '', slug: '', description: '', shortDescription: '', sku: '', categoryName: 'Home', categorySlug: 'home', price: '', compareAtPrice: '', stock: '0', active: true }
 
 export default function AdminPage() {
+  useSEO({ title: 'Admin Dashboard | Raja Store', noIndex: true })
   const [token, setToken] = useState(() => sessionStorage.getItem('raja-admin-token') ?? '')
   const [draftToken, setDraftToken] = useState(token)
   const [orders, setOrders] = useState<AdminOrder[]>([])

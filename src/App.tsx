@@ -29,7 +29,7 @@ import {
   Zap,
 } from 'lucide-react'
 import { BrowserRouter, Link, Route, Routes, useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom'
-import { getProductCategories, getProducts } from './services/productService'
+import { getProductCategories, getProducts, resolveImageUrl } from './services/productService'
 import { useCart } from './context/CartContext'
 import type { Category, Product, ProductVariant } from './types/product'
 import { formatPrice, getDiscountPercent } from './utils/format'
@@ -38,6 +38,7 @@ import { appendMyOrder, getMyOrders, updateMyOrderStatus, getActiveOrdersCount }
 import DevDatabasePage from './DevDatabasePage'
 import AdminPage from './AdminPage'
 import { API_BASE_URL } from './config'
+import { useSEO } from './hooks/useSEO'
 
 type SortOption = 'featured' | 'price-low' | 'price-high' | 'newest' | 'name'
 
@@ -431,7 +432,7 @@ function ProductCard({
 }: {
   product: Product
   onAdd: (product: Product) => void
-  onOpen: (slug: string) => void
+  onOpen?: (slug: string) => void
 }) {
   const discount = getDiscountPercent(product.price, product.compareAtPrice)
   const isOutOfStock = product.stock === 0
@@ -439,7 +440,11 @@ function ProductCard({
 
   return (
     <article className="product-card">
-      <div className="card-media-wrap" onClick={() => onOpen(product.slug)}>
+      <Link
+        to={`/product/${product.slug}`}
+        className="card-media-wrap"
+        onClick={onOpen ? () => onOpen(product.slug) : undefined}
+      >
         <img
           src={product.images[0]}
           alt={product.name}
@@ -457,18 +462,19 @@ function ProductCard({
         ) : isLowStock ? (
           <span className="stock-warning-pill">Only {product.stock} Left</span>
         ) : null}
-      </div>
+      </Link>
 
       <div className="card-body">
         <span className="card-category">{product.category.name}</span>
 
-        <button
+        <Link
+          to={`/product/${product.slug}`}
           className="card-title"
-          onClick={() => onOpen(product.slug)}
+          onClick={onOpen ? () => onOpen(product.slug) : undefined}
           title={product.name}
         >
           {product.name}
-        </button>
+        </Link>
 
         <div className="card-rating-row">
           <span className="rating-pill">
@@ -726,6 +732,13 @@ function HomePage() {
     return sections.filter((s) => s.products.length > 0).slice(0, 4)
   }, [products, categories])
 
+  useSEO({
+    title: 'Raja Store | Everyday Essentials Delivered in Chennai',
+    description: 'Shop kitchen, cleaning, wellness and household essentials at affordable prices from Raja Store with fast delivery in Chennai and secure COD & UPI.',
+    canonical: 'https://raja-store.vercel.app/',
+    ogType: 'website',
+  })
+
   return (
     <Layout>
       <div className="home-container">
@@ -758,6 +771,7 @@ function HomePage() {
             <img
               src="https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=900&q=85"
               alt="Everyday kitchen and household essentials at Raja Store"
+              fetchPriority="high"
             />
           </div>
         </section>
@@ -772,24 +786,24 @@ function HomePage() {
               </Link>
             </div>
             <div className="category-chips-row">
-              <button
+              <Link
+                to="/products"
                 className="category-chip"
-                onClick={() => navigate('/products')}
               >
                 <Grid size={14} />
                 <span>All Items ({products.length})</span>
-              </button>
+              </Link>
               {categories.map((cat) => {
                 const count = products.filter((p) => p.category.slug === cat.slug).length
                 return (
-                  <button
+                  <Link
                     key={cat.slug}
+                    to={`/products?category=${cat.slug}`}
                     className="category-chip"
-                    onClick={() => navigate(`/products?category=${cat.slug}`)}
                   >
                     <span>{cat.name}</span>
                     <span className="chip-count">({count})</span>
-                  </button>
+                  </Link>
                 )
               })}
             </div>
@@ -894,6 +908,34 @@ function ProductsPage() {
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
   }, [searchQuery, activeCategory])
+
+  const currentCategoryName = useMemo(() => {
+    if (activeCategory === 'all') return ''
+    return categories.find((c) => c.slug === activeCategory)?.name ?? ''
+  }, [activeCategory, categories])
+
+  const seoTitle = searchQuery
+    ? `Search: "${searchQuery}" | Raja Store`
+    : currentCategoryName
+      ? `${currentCategoryName} Essentials | Raja Store`
+      : 'Shop All Products | Raja Store'
+
+  const seoDescription = searchQuery
+    ? `Browse results for "${searchQuery}" at Raja Store. Affordable household and kitchen essentials delivered fast in Chennai.`
+    : currentCategoryName
+      ? `Explore our collection of ${currentCategoryName.toLowerCase()} essentials at Raja Store. Fast delivery across Chennai with Cash on Delivery and UPI.`
+      : 'Discover our complete collection of everyday essentials, cookware, home goods, and wellness products at Raja Store Chennai.'
+
+  const seoCanonical = activeCategory !== 'all'
+    ? `https://raja-store.vercel.app/products?category=${activeCategory}`
+    : 'https://raja-store.vercel.app/products'
+
+  useSEO({
+    title: seoTitle,
+    description: seoDescription,
+    canonical: seoCanonical,
+    ogType: 'website',
+  })
 
   function handleAdd(product: Product) {
     addToCart(product)
@@ -1012,6 +1054,45 @@ function ProductPage() {
     }
   }, [slug, product])
 
+  const isProductNotFound = products.length > 0 && !product
+  const primaryImage = product?.images?.[0] ? resolveImageUrl(product.images[0]) : undefined
+
+  const jsonLd = useMemo(() => {
+    if (!product) return undefined
+    const inStock = product.stock > 0
+    return {
+      '@context': 'https://schema.org',
+      '@type': 'Product',
+      name: product.name,
+      image: product.images && product.images.length > 0 ? product.images.map((img) => resolveImageUrl(img)) : undefined,
+      description: product.description || product.shortDescription || product.name,
+      sku: product.sku || undefined,
+      offers: {
+        '@type': 'Offer',
+        price: product.price,
+        priceCurrency: 'INR',
+        availability: inStock ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock',
+        url: `https://raja-store.vercel.app/product/${product.slug}`,
+      },
+    }
+  }, [product])
+
+  useSEO({
+    title: isProductNotFound
+      ? 'Product Not Found | Raja Store'
+      : product
+        ? `${product.name} | Raja Store`
+        : 'Loading Product... | Raja Store',
+    description: product
+      ? (product.shortDescription || product.description || `Buy ${product.name} online at Raja Store Chennai.`)
+      : undefined,
+    canonical: product ? `https://raja-store.vercel.app/product/${product.slug}` : undefined,
+    ogType: product ? 'product' : 'website',
+    ogImage: primaryImage,
+    noIndex: isProductNotFound,
+    jsonLd,
+  })
+
   const relatedProducts = useMemo(() => {
     if (!product) return []
     const sameCategory = products.filter(
@@ -1073,7 +1154,7 @@ function ProductPage() {
             <div className="detail-main-img-wrap">
               <img
                 src={product.images[selectedImage] ?? product.images[0]}
-                alt={product.name}
+                alt={`${product.name} - Everyday Essentials at Raja Store`}
               />
             </div>
             {product.images.length > 1 && (
@@ -1084,7 +1165,7 @@ function ProductPage() {
                     className={`thumb-btn ${selectedImage === idx ? 'active' : ''}`}
                     onClick={() => setSelectedImage(idx)}
                   >
-                    <img src={img} alt={`View ${idx + 1}`} />
+                    <img src={img} alt={`${product.name} view ${idx + 1}`} loading="lazy" />
                   </button>
                 ))}
               </div>
@@ -1284,6 +1365,7 @@ function CartDeliveryProgress({ subtotal }: { subtotal: number }) {
    CART PAGE
    ========================================================================== */
 function CartPage() {
+  useSEO({ title: 'Shopping Bag | Raja Store', noIndex: true })
   const { cartItems, updateQuantity, removeFromCart, getCartItemCount, getCartSubtotal } = useCart()
   const navigate = useNavigate()
   const subtotal = getCartSubtotal()
@@ -1456,6 +1538,7 @@ function loadSavedPaymentMethod(): PaymentMethod | '' {
 }
 
 function CheckoutPage() {
+  useSEO({ title: 'Checkout | Raja Store', noIndex: true })
   const { cartItems, getCartSubtotal, clearCart } = useCart()
   const navigate = useNavigate()
 
@@ -2096,6 +2179,7 @@ function CheckoutPage() {
    GUEST ORDER TRACKING PAGE
    ========================================================================== */
 function TrackOrderPage() {
+  useSEO({ title: 'Track Order | Raja Store', noIndex: true })
   const [orderId, setOrderId] = useState('')
   const [phone, setPhone] = useState('')
   const [order, setOrder] = useState<TrackedOrder>()
@@ -2268,6 +2352,7 @@ function TrackOrderPage() {
    ORDER SUCCESS & FAILURE PAGES
    ========================================================================== */
 function OrderSuccessPage() {
+  useSEO({ title: 'Order Confirmation | Raja Store', noIndex: true })
   const location = useLocation()
   const navigate = useNavigate()
   const {
@@ -2363,6 +2448,7 @@ function OrderSuccessPage() {
 }
 
 function OrderFailurePage() {
+  useSEO({ title: 'Order Failed | Raja Store', noIndex: true })
   return (
     <Layout>
       <div className="order-status-wrapper">
@@ -2400,6 +2486,7 @@ function isCompletedOrder(status: string) {
 }
 
 function MyOrdersPage() {
+  useSEO({ title: 'My Orders | Raja Store', noIndex: true })
   const navigate = useNavigate()
   const [orders, setOrders] = useState<import('./services/myOrdersService').StoredOrder[]>(
     () => getMyOrders()
@@ -2547,6 +2634,46 @@ function MyOrdersPage() {
 }
 
 /* ==========================================================================
+   404 NOT FOUND PAGE
+   ========================================================================== */
+function NotFoundPage() {
+  useSEO({
+    title: 'Page Not Found | Raja Store',
+    description: "The page you are looking for does not exist on Raja Store. Browse our collections or return to the homepage.",
+    noIndex: true,
+  })
+
+  return (
+    <Layout>
+      <div className="state-box" style={{ padding: '80px 20px', maxWidth: '540px', margin: '40px auto', textAlign: 'center' }}>
+        <h1 style={{ fontSize: '48px', fontWeight: 800, color: 'var(--color-primary)', marginBottom: '8px' }}>404</h1>
+        <h2 style={{ fontSize: '20px', fontWeight: 600, marginBottom: '12px' }}>Page Not Found</h2>
+        <p style={{ color: 'var(--text-muted)', marginBottom: '24px', lineHeight: 1.6 }}>
+          We couldn't find the page you're looking for. It may have been moved, renamed, or is temporarily unavailable.
+        </p>
+        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
+          <Link to="/" className="hero-cta-btn" style={{ textDecoration: 'none' }}>
+            Go to Homepage
+          </Link>
+          <Link
+            to="/products"
+            className="hero-cta-btn"
+            style={{
+              textDecoration: 'none',
+              background: 'var(--bg-surface)',
+              color: 'var(--text-primary)',
+              border: '1px solid var(--border-subtle)',
+            }}
+          >
+            Browse Products
+          </Link>
+        </div>
+      </div>
+    </Layout>
+  )
+}
+
+/* ==========================================================================
    MAIN APP ROUTER
    ========================================================================== */
 export default function App() {
@@ -2564,6 +2691,7 @@ export default function App() {
         <Route path="/my-orders" element={<MyOrdersPage />} />
         <Route path="/dev/database" element={<DevDatabasePage />} />
         <Route path="/admin" element={<AdminPage />} />
+        <Route path="*" element={<NotFoundPage />} />
       </Routes>
     </BrowserRouter>
   )

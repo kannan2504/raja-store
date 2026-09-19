@@ -674,6 +674,7 @@ img {
   transition: all var(--transition-fast);
   box-shadow: var(--shadow-sm);
   cursor: pointer;
+  text-decoration: none;
 }
 
 .category-chip:hover {
@@ -1011,11 +1012,14 @@ img {
 
 .card-media-wrap {
   position: relative;
+  display: block;
   width: 100%;
   aspect-ratio: 1 / 1.05;
   background: var(--bg-surface);
   overflow: hidden;
   cursor: pointer;
+  text-decoration: none;
+  color: inherit;
 }
 
 .card-media-wrap img {
@@ -1111,6 +1115,7 @@ img {
   padding: 0;
   text-align: left;
   width: 100%;
+  text-decoration: none;
 }
 
 .card-title:hover {
