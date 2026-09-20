@@ -59,7 +59,18 @@ const environmentSchema = z.object({
 
 })
 
-const parsed = environmentSchema.safeParse(process.env)
-if (!parsed.success) throw new Error('Invalid server environment configuration')
+export function formatConfigIssues(issues: z.ZodIssue[]): string {
+  return issues.map((issue) => `${issue.path.join('.') || 'configuration'}: ${issue.message}`).join('; ')
+}
 
-export const env = parsed.data
+export function validateEnvironment(input: Record<string, unknown> = process.env) {
+  const result = environmentSchema.safeParse(input)
+  if (!result.success) {
+    throw new Error(`Invalid server environment configuration: ${formatConfigIssues(result.error.issues)}`)
+  }
+  return result.data
+}
+
+export { environmentSchema }
+export const env = validateEnvironment(process.env)
+

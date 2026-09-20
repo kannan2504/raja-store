@@ -5,8 +5,8 @@ import { randomUUID } from 'node:crypto'
 
 import { errorHandler } from './middleware/errorHandler'
 import { createOrderRoutes } from './routes/createOrderRoutes'
-import type { OrderRepository } from './repositories/orderRepository'
-import type { ProductRepository } from './repositories/productRepository'
+import { InMemoryOrderRepository, type OrderRepository } from './repositories/orderRepository'
+import { InMemoryProductRepository, type ProductRepository } from './repositories/productRepository'
 import { getPaymentConfig } from './controllers/paymentController'
 import { createDevelopmentRoutes } from './routes/developmentRoutes'
 import { env } from './config/env'
@@ -28,6 +28,15 @@ export function makeApp(
   productImageStorage?: ProductImageStorage,
   paymentProofStorage?: PaymentProofStorage,
 ) {
+  if (env.NODE_ENV === 'production') {
+    if (persistenceMode !== 'mongo' || !databaseConnected) {
+      throw new Error('Production requires MongoDB persistence. Memory persistence is forbidden in production.')
+    }
+    if (products instanceof InMemoryProductRepository || orders instanceof InMemoryOrderRepository) {
+      throw new Error('Production requires MongoDB repositories. In-memory repositories are forbidden in production.')
+    }
+  }
+
   const application = express()
 
   const proofStorage = paymentProofStorage ?? createPaymentProofStorage()
@@ -89,16 +98,18 @@ export function makeApp(
     createAdminRoutes(proofStorage, imageStorage),
   )
 
-  application.use(
-    '/api/dev',
-    createDevelopmentRoutes(
-      products,
-      orders,
-      persistenceMode,
-      databaseConnected,
-      env.NODE_ENV === 'development',
-    ),
-  )
+  if (env.NODE_ENV !== 'production') {
+    application.use(
+      '/api/dev',
+      createDevelopmentRoutes(
+        products,
+        orders,
+        persistenceMode,
+        databaseConnected,
+        env.NODE_ENV === 'development',
+      ),
+    )
+  }
 
   application.use(
     '/api/orders',

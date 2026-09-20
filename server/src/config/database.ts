@@ -12,8 +12,8 @@ export async function connectDatabase() {
     await mongoose.connect(env.DATABASE_URL, { serverSelectionTimeoutMS: 5000 })
     connected = true
     return true
-  } catch (error) {
-    console.error('MongoDB connection failed', error)
+  } catch {
+    console.error('MongoDB connection failed')
     if (env.NODE_ENV === 'production' || env.PERSISTENCE_MODE === 'mongo') throw new Error('Database connection failed')
     return false
   }
