@@ -86,9 +86,6 @@ export function CartProvider({ children }: { children: ReactNode }) {
       if (newSubtotal < 200) {
         message = `Add ${formatPrice(200 - newSubtotal)} more to place your order`
         type = 'below_min'
-      } else if (newSubtotal < 300) {
-        message = `Add ${formatPrice(300 - newSubtotal)} more for FREE delivery`
-        type = 'below_free'
       } else {
         message = 'FREE delivery unlocked'
         type = 'free_unlocked'

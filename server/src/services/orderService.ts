@@ -82,7 +82,7 @@ export class OrderService {
     if (subtotal < env.MINIMUM_ORDER_VALUE) throw new HttpError(400, 'MINIMUM_ORDER_NOT_MET', `Minimum order value is ₹${env.MINIMUM_ORDER_VALUE}.`)
     const reserved = await this.products.reserveStock(input.items)
     if (!reserved) throw new HttpError(409, 'OUT_OF_STOCK', 'One or more products are no longer available in the requested quantity.')
-    const deliveryCharge = subtotal >= 300 ? 0 : env.DELIVERY_CHARGE
+    const deliveryCharge = 0
     const now = new Date().toISOString()
     const trackingToken = randomBytes(32).toString('hex')
     const trackingTokenHash = createHash('sha256').update(trackingToken).digest('hex')

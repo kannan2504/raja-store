@@ -18,7 +18,7 @@ const environmentSchema = z.object({
   PERSISTENCE_MODE: z.enum(['memory', 'mongo']).default('memory'),
   FRONTEND_URL: z.string().url().default('http://localhost:5173'),
   ADDITIONAL_FRONTEND_URLS: additionalOriginsSchema,
-  DELIVERY_CHARGE: z.coerce.number().nonnegative().default(50),
+  DELIVERY_CHARGE: z.coerce.number().nonnegative().default(0),
   MINIMUM_ORDER_VALUE: z.coerce.number().nonnegative().default(200),
   MAX_ITEM_QUANTITY: z.coerce.number().int().positive().default(100),
   STORE_NAME: z.string().min(1).default('Raja Store'),

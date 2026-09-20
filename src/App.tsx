@@ -24,6 +24,7 @@ import {
   Star,
   Sun,
   Tag,
+  Trash2,
   Truck,
   X,
   Zap,
@@ -70,19 +71,598 @@ function useTheme() {
 }
 
 /* ==========================================================================
-   CATALOG DATA HOOK
+   CATALOG DATA HOOK (WITH IN-MEMORY DEDUPLICATION CACHE)
    ========================================================================== */
+let cachedProducts: Product[] = []
+let catalogFetchPromise: Promise<Product[]> | null = null
+
+function getCachedProducts(): Promise<Product[]> {
+  if (cachedProducts.length > 0) return Promise.resolve(cachedProducts)
+  if (catalogFetchPromise) return catalogFetchPromise
+  catalogFetchPromise = getProducts().then((res) => {
+    cachedProducts = res
+    catalogFetchPromise = null
+    return res
+  })
+  return catalogFetchPromise
+}
+
 function useCatalog() {
-  const [products, setProducts] = useState<Product[]>([])
+  const [products, setProducts] = useState<Product[]>(() => cachedProducts)
   useEffect(() => {
-    const refresh = () => {
-      void getProducts().then(setProducts)
+    let isMounted = true
+    const refresh = (force = false) => {
+      if (force) {
+        cachedProducts = []
+        catalogFetchPromise = null
+      }
+      void getCachedProducts().then((data) => {
+        if (isMounted) setProducts(data)
+      })
     }
-    refresh()
-    window.addEventListener('raja-store-products-invalidated', refresh)
-    return () => window.removeEventListener('raja-store-products-invalidated', refresh)
+    if (cachedProducts.length === 0) {
+      refresh()
+    }
+    const handleInvalidate = () => refresh(true)
+    window.addEventListener('raja-store-products-invalidated', handleInvalidate)
+    return () => {
+      isMounted = false
+      window.removeEventListener('raja-store-products-invalidated', handleInvalidate)
+    }
   }, [])
   return products
+}
+
+/* ==========================================================================
+   SCROLL REVEAL — LIGHTWEIGHT INTERSECTIONOBSERVER ANIMATION
+   ========================================================================== */
+function ScrollRevealSection({ children, className = '' }: { children: React.ReactNode; className?: string }) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    // Respect prefers-reduced-motion
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return
+    el.classList.add('reveal-hidden')
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          el.classList.remove('reveal-hidden')
+          el.classList.add('reveal-visible')
+          observer.disconnect()
+        }
+      },
+      { threshold: 0.06, rootMargin: '0px 0px -24px 0px' }
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
+  return <div ref={ref} className={className}>{children}</div>
+}
+
+/* ==========================================================================
+   PROMO BANNER — 4-SLIDE ANIMATED CAROUSEL (HOMEPAGE HERO REPLACEMENT)
+   ========================================================================== */
+const PROMO_SLIDES = [
+  {
+    id: 'daily-essentials',
+    tag: '\u{1F6D2} Raja Store',
+    headline: 'Daily Essentials,',
+    headlineAccent: 'Everything Your Home Needs.',
+    body: 'Kitchen, cleaning & household necessities at honest prices — delivered fast around Chennai.',
+    cta: 'Shop Now',
+    ctaLink: '/products',
+    gradient: 'linear-gradient(135deg, #0a3d4e 0%, #1b5e40 100%)',
+    accentColor: '#5ee0b4',
+    ctaColor: '#0a3d4e',
+    shapeColor: 'rgba(255,255,255,0.07)',
+  },
+  {
+    id: 'combo-offers',
+    tag: '\u{1F4B0} Special Combos',
+    headline: 'Combo Offers —',
+    headlineAccent: 'More Value Together.',
+    body: 'Buy more, save more. Explore bundles and multi-packs for your household needs.',
+    cta: 'Browse Products',
+    ctaLink: '/products',
+    gradient: 'linear-gradient(135deg, #7c1d0a 0%, #b33a14 100%)',
+    accentColor: '#fbbf24',
+    ctaColor: '#7c1d0a',
+    shapeColor: 'rgba(255,255,255,0.07)',
+  },
+  {
+    id: 'bulk-orders',
+    tag: '\u{1F4E6} For Families & Businesses',
+    headline: 'Need More?',
+    headlineAccent: 'Order in Bulk.',
+    body: 'Stock up for your household or business. Larger quantities at fair, transparent prices.',
+    cta: 'Shop in Bulk',
+    ctaLink: '/products',
+    gradient: 'linear-gradient(135deg, #14532d 0%, #0f3321 100%)',
+    accentColor: '#86efac',
+    ctaColor: '#14532d',
+    shapeColor: 'rgba(255,255,255,0.07)',
+  },
+  {
+    id: 'fast-delivery',
+    tag: '\u26A1 Chennai Local',
+    headline: 'Fast Local',
+    headlineAccent: 'Delivery.',
+    body: 'Eligible local orders may arrive within 12 hours after dispatch. Fresh stock, every day.',
+    cta: 'Order Now',
+    ctaLink: '/products',
+    gradient: 'linear-gradient(135deg, #1e1b4b 0%, #3730a3 100%)',
+    accentColor: '#a5b4fc',
+    ctaColor: '#1e1b4b',
+    shapeColor: 'rgba(255,255,255,0.07)',
+  },
+] as const
+
+function PromoBanner() {
+  const [active, setActive] = useState(0)
+  const navigate = useNavigate()
+  const timerRef = useRef<number | null>(null)
+  const isPausedRef = useRef(false)
+  const pointerStartX = useRef<number | null>(null)
+  const TOTAL = PROMO_SLIDES.length
+  const AUTO_MS = 5000
+
+  function resetAndStart() {
+    if (timerRef.current) window.clearInterval(timerRef.current)
+    if (typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      return
+    }
+    timerRef.current = window.setInterval(() => {
+      if (!isPausedRef.current && !document.hidden) {
+        setActive((a) => (a + 1) % TOTAL)
+      }
+    }, AUTO_MS)
+  }
+
+  function goTo(idx: number) { setActive(idx); resetAndStart() }
+  function next() { setActive((a) => (a + 1) % TOTAL); resetAndStart() }
+  function prev() { setActive((a) => (a - 1 + TOTAL) % TOTAL); resetAndStart() }
+
+  useEffect(() => {
+    resetAndStart()
+    function onVisibility() {
+      if (!document.hidden) resetAndStart()
+      else if (timerRef.current) { window.clearInterval(timerRef.current); timerRef.current = null }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => {
+      if (timerRef.current) window.clearInterval(timerRef.current)
+      document.removeEventListener('visibilitychange', onVisibility)
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  function handlePointerDown(e: React.PointerEvent) {
+    pointerStartX.current = e.clientX
+  }
+  function handlePointerUp(e: React.PointerEvent) {
+    if (pointerStartX.current === null) return
+    const delta = e.clientX - pointerStartX.current
+    if (Math.abs(delta) > 44) delta < 0 ? next() : prev()
+    pointerStartX.current = null
+  }
+
+  return (
+    <section
+      className="promo-banner"
+      aria-label="Promotional announcements"
+      aria-roledescription="carousel"
+      onMouseEnter={() => { isPausedRef.current = true }}
+      onMouseLeave={() => { isPausedRef.current = false }}
+      onPointerDown={handlePointerDown}
+      onPointerUp={handlePointerUp}
+    >
+      {/* Visually-hidden H1 for homepage SEO — promo slides use h2 */}
+      <h1 className="sr-only">Raja Store — Everyday Essentials Delivered in Chennai</h1>
+
+      {PROMO_SLIDES.map((s, idx) => (
+        <div
+          key={s.id}
+          className={`promo-slide${idx === active ? ' is-active' : ''}`}
+          style={{ background: s.gradient }}
+          aria-hidden={idx !== active}
+          role="group"
+          aria-roledescription="slide"
+          aria-label={`${idx + 1} of ${TOTAL}: ${s.headline}`}
+        >
+          <div className="promo-shape promo-shape-1" style={{ background: s.shapeColor }} />
+          <div className="promo-shape promo-shape-2" style={{ background: s.shapeColor }} />
+          <div className="promo-shape promo-shape-3" style={{ background: s.shapeColor }} />
+
+          <div className="promo-content">
+            <span className="promo-tag">{s.tag}</span>
+            <h2 className="promo-headline">
+              {s.headline}
+              <span className="promo-headline-accent" style={{ color: s.accentColor }}>
+                {' '}{s.headlineAccent}
+              </span>
+            </h2>
+            <p className="promo-body">{s.body}</p>
+            <button
+              className="promo-cta-btn"
+              style={{ color: s.ctaColor }}
+              onClick={() => navigate(s.ctaLink)}
+              aria-label={`${s.cta} — ${s.headline}`}
+            >
+              {s.cta} <ArrowRight size={14} />
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {/* Nav arrows — hidden on mobile (swipe instead) */}
+      <button className="promo-nav promo-nav-prev" onClick={prev} aria-label="Previous slide">
+        <ChevronLeft size={18} />
+      </button>
+      <button className="promo-nav promo-nav-next" onClick={next} aria-label="Next slide">
+        <ChevronRight size={18} />
+      </button>
+
+      {/* Dot pagination */}
+      <div className="promo-dots" role="tablist" aria-label="Carousel navigation">
+        {PROMO_SLIDES.map((s, idx) => (
+          <button
+            key={s.id}
+            className={`promo-dot${idx === active ? ' is-active' : ''}`}
+            onClick={() => goTo(idx)}
+            role="tab"
+            aria-selected={idx === active}
+            aria-label={`Go to slide ${idx + 1}`}
+          />
+        ))}
+      </div>
+    </section>
+  )
+}
+
+/* ==========================================================================
+   PHASE 2: SEARCH TYPEAHEAD & SUGGESTIONS
+   ========================================================================== */
+interface CategorySuggestion {
+  type: 'category'
+  id: string
+  label: string
+  slug: string
+}
+
+interface ProductSuggestion {
+  type: 'product'
+  id: string
+  label: string
+  slug: string
+  price: number
+  image?: string
+}
+
+type Suggestion = CategorySuggestion | ProductSuggestion
+
+function highlightMatch(text: string, query: string) {
+  if (!query.trim()) return text
+  const trimmed = query.trim()
+  const idx = text.toLowerCase().indexOf(trimmed.toLowerCase())
+  if (idx === -1) return text
+  const before = text.slice(0, idx)
+  const match = text.slice(idx, idx + trimmed.length)
+  const after = text.slice(idx + trimmed.length)
+  return (
+    <>
+      {before}
+      <em>{match}</em>
+      {after}
+    </>
+  )
+}
+
+function useSearchSuggestions(query: string, products: Product[]) {
+  const [debouncedQuery, setDebouncedQuery] = useState(query)
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query)
+    }, 180)
+    return () => clearTimeout(timer)
+  }, [query])
+
+  const suggestions = useMemo(() => {
+    const q = debouncedQuery.trim().toLowerCase()
+    if (!q) return { categories: [], products: [], all: [] }
+
+    // 1. Matching categories (max 3)
+    const allCategories = getProductCategories(products)
+    const matchingCategories: CategorySuggestion[] = allCategories
+      .filter((c) => c.name.toLowerCase().includes(q))
+      .slice(0, 3)
+      .map((c) => ({
+        type: 'category',
+        id: `cat-${c.slug}`,
+        label: c.name,
+        slug: c.slug,
+      }))
+
+    // 2. Matching products (max 5)
+    const matchingProducts: ProductSuggestion[] = products
+      .filter((p) =>
+        [p.name, p.category.name, p.sku, p.shortDescription || '', p.description || ''].some((field) =>
+          field.toLowerCase().includes(q)
+        )
+      )
+      .slice(0, 5)
+      .map((p) => ({
+        type: 'product',
+        id: p.id,
+        label: p.name,
+        slug: p.slug,
+        price: p.price,
+        image: p.images[0],
+      }))
+
+    const all: Suggestion[] = [...matchingCategories, ...matchingProducts]
+    return { categories: matchingCategories, products: matchingProducts, all }
+  }, [debouncedQuery, products])
+
+  return suggestions
+}
+
+function SearchSuggestionsDropdown({
+  query,
+  suggestions,
+  activeIndex,
+  onSelect,
+  onHoverIndex,
+}: {
+  query: string
+  suggestions: {
+    categories: CategorySuggestion[]
+    products: ProductSuggestion[]
+    all: Suggestion[]
+  }
+  activeIndex: number
+  onSelect: (item: Suggestion) => void
+  onHoverIndex: (idx: number) => void
+}) {
+  let globalIndex = 0
+
+  return (
+    <div className="search-suggestions" role="listbox" id="search-suggestions-dropdown">
+      {suggestions.categories.length > 0 && (
+        <>
+          <div className="suggestions-group-label">Categories</div>
+          {suggestions.categories.map((cat) => {
+            const currentIndex = globalIndex++
+            const isFocused = currentIndex === activeIndex
+            return (
+              <button
+                key={cat.id}
+                type="button"
+                className={`suggestion-item ${isFocused ? 'is-focused' : ''}`}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  onSelect(cat)
+                }}
+                onClick={() => onSelect(cat)}
+                onMouseEnter={() => onHoverIndex(currentIndex)}
+                role="option"
+                aria-selected={isFocused}
+              >
+                <Tag size={13} className="suggestion-icon" />
+                <span>{highlightMatch(cat.label, query)}</span>
+                <span className="suggestion-meta">Category</span>
+              </button>
+            )
+          })}
+        </>
+      )}
+
+      {suggestions.categories.length > 0 && suggestions.products.length > 0 && (
+        <div className="suggestions-divider" />
+      )}
+
+      {suggestions.products.length > 0 && (
+        <>
+          <div className="suggestions-group-label">Products</div>
+          {suggestions.products.map((prod) => {
+            const currentIndex = globalIndex++
+            const isFocused = currentIndex === activeIndex
+            return (
+              <button
+                key={prod.id}
+                type="button"
+                className={`suggestion-item ${isFocused ? 'is-focused' : ''}`}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  onSelect(prod)
+                }}
+                onClick={() => onSelect(prod)}
+                onMouseEnter={() => onHoverIndex(currentIndex)}
+                role="option"
+                aria-selected={isFocused}
+              >
+                {prod.image ? (
+                  <img
+                    src={prod.image}
+                    alt=""
+                    style={{
+                      width: 28,
+                      height: 28,
+                      borderRadius: 4,
+                      objectFit: 'cover',
+                      flexShrink: 0,
+                    }}
+                  />
+                ) : (
+                  <Search size={13} className="suggestion-icon" />
+                )}
+                <span>{highlightMatch(prod.label, query)}</span>
+                <span className="suggestion-meta">{formatPrice(prod.price)}</span>
+              </button>
+            )
+          })}
+        </>
+      )}
+    </div>
+  )
+}
+
+function SearchBox({
+  variant,
+  value,
+  onChange,
+  onSubmit,
+  products,
+}: {
+  variant: 'desktop' | 'mobile'
+  value: string
+  onChange: (val: string) => void
+  onSubmit: (val: string) => void
+  products: Product[]
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const [activeIndex, setActiveIndex] = useState(-1)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const navigate = useNavigate()
+  const suggestions = useSearchSuggestions(value, products)
+
+  useEffect(() => {
+    setActiveIndex(-1)
+  }, [suggestions.all.length])
+
+  useEffect(() => {
+    function handleClickOutside(e: MouseEvent) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setIsOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside)
+    return () => document.removeEventListener('mousedown', handleClickOutside)
+  }, [])
+
+  function handleSelect(item: Suggestion) {
+    setIsOpen(false)
+    if (item.type === 'category') {
+      navigate(`/products?category=${item.slug}`)
+    } else {
+      navigate(`/product/${item.slug}`)
+    }
+  }
+
+  function handleFormSubmit(e: FormEvent) {
+    e.preventDefault()
+    if (isOpen && activeIndex >= 0 && activeIndex < suggestions.all.length) {
+      handleSelect(suggestions.all[activeIndex])
+      return
+    }
+    setIsOpen(false)
+    onSubmit(value)
+  }
+
+  function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (suggestions.all.length === 0) return
+
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      if (!isOpen) {
+        setIsOpen(true)
+        setActiveIndex(0)
+      } else {
+        setActiveIndex((prev) => (prev + 1) % suggestions.all.length)
+      }
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      if (!isOpen) {
+        setIsOpen(true)
+        setActiveIndex(suggestions.all.length - 1)
+      } else {
+        setActiveIndex((prev) => (prev <= 0 ? suggestions.all.length - 1 : prev - 1))
+      }
+    } else if (e.key === 'Enter') {
+      if (isOpen && activeIndex >= 0 && activeIndex < suggestions.all.length) {
+        e.preventDefault()
+        handleSelect(suggestions.all[activeIndex])
+      }
+    } else if (e.key === 'Escape') {
+      setIsOpen(false)
+      setActiveIndex(-1)
+    }
+  }
+
+  if (variant === 'desktop') {
+    return (
+      <form className="header-search-form" onSubmit={handleFormSubmit} role="search">
+        <div className="search-suggestion-wrap" ref={wrapRef}>
+          <Search size={15} className="header-search-icon" />
+          <input
+            className="header-search-input"
+            placeholder="Search products..."
+            value={value}
+            onChange={(e) => {
+              onChange(e.target.value)
+              setIsOpen(true)
+            }}
+            onFocus={() => {
+              if (value.trim()) setIsOpen(true)
+            }}
+            onKeyDown={handleKeyDown}
+            aria-label="Search collection"
+            aria-autocomplete="list"
+            aria-expanded={isOpen && suggestions.all.length > 0}
+          />
+          {isOpen && suggestions.all.length > 0 && (
+            <SearchSuggestionsDropdown
+              query={value}
+              suggestions={suggestions}
+              activeIndex={activeIndex}
+              onSelect={handleSelect}
+              onHoverIndex={setActiveIndex}
+            />
+          )}
+        </div>
+      </form>
+    )
+  }
+
+  return (
+    <form className="mobile-search-form" onSubmit={handleFormSubmit} role="search">
+      <div className="search-suggestion-wrap" ref={wrapRef}>
+        <button
+          type="submit"
+          className="mobile-search-submit"
+          aria-label="Search products"
+        >
+          <Search size={15} className="mobile-search-icon" />
+        </button>
+        <input
+          type="search"
+          className="mobile-search-input"
+          placeholder="Search products..."
+          value={value}
+          onChange={(e) => {
+            onChange(e.target.value)
+            setIsOpen(true)
+          }}
+          onFocus={() => {
+            if (value.trim()) setIsOpen(true)
+          }}
+          onKeyDown={handleKeyDown}
+          aria-label="Search collection"
+          aria-autocomplete="list"
+          aria-expanded={isOpen && suggestions.all.length > 0}
+        />
+        {isOpen && suggestions.all.length > 0 && (
+          <SearchSuggestionsDropdown
+            query={value}
+            suggestions={suggestions}
+            activeIndex={activeIndex}
+            onSelect={handleSelect}
+            onHoverIndex={setActiveIndex}
+          />
+        )}
+      </div>
+    </form>
+  )
 }
 
 /* ==========================================================================
@@ -95,7 +675,16 @@ function SiteHeader() {
   const { theme, toggleTheme } = useTheme()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [searchVal, setSearchVal] = useState('')
+  const products = useCatalog()
   const count = getCartItemCount()
+
+  // Sync search input with URL search param when on /products
+  useEffect(() => {
+    const query = new URLSearchParams(location.search).get('search') ?? ''
+    if (location.pathname === '/products') {
+      setSearchVal(query)
+    }
+  }, [location.pathname, location.search])
 
   // Close drawer on route change
   useEffect(() => {
@@ -114,9 +703,8 @@ function SiteHeader() {
     }
   }, [drawerOpen])
 
-  function handleSearch(e: FormEvent) {
-    e.preventDefault()
-    const trimmed = searchVal.trim()
+  function handleSearchSubmit(query: string) {
+    const trimmed = query.trim()
     navigate(trimmed ? `/products?search=${encodeURIComponent(trimmed)}` : '/products')
   }
 
@@ -153,16 +741,13 @@ function SiteHeader() {
           </div>
 
           <div className="header-actions">
-            <form className="header-search-form" onSubmit={handleSearch}>
-              <Search size={15} className="header-search-icon" />
-              <input
-                className="header-search-input"
-                placeholder="Search products..."
-                value={searchVal}
-                onChange={(e) => setSearchVal(e.target.value)}
-                aria-label="Search collection"
-              />
-            </form>
+            <SearchBox
+              variant="desktop"
+              value={searchVal}
+              onChange={setSearchVal}
+              onSubmit={handleSearchSubmit}
+              products={products}
+            />
 
             <button
               className="icon-btn theme-btn"
@@ -186,23 +771,13 @@ function SiteHeader() {
 
         {/* Mobile Search Bar - directly below main header row */}
         <div className="mobile-search-bar">
-          <form className="mobile-search-form" onSubmit={handleSearch} role="search">
-            <button
-              type="submit"
-              className="mobile-search-submit"
-              aria-label="Search products"
-            >
-              <Search size={15} className="mobile-search-icon" />
-            </button>
-            <input
-              type="search"
-              className="mobile-search-input"
-              placeholder="Search products..."
-              value={searchVal}
-              onChange={(e) => setSearchVal(e.target.value)}
-              aria-label="Search collection"
-            />
-          </form>
+          <SearchBox
+            variant="mobile"
+            value={searchVal}
+            onChange={setSearchVal}
+            onSubmit={handleSearchSubmit}
+            products={products}
+          />
         </div>
       </div>
 
@@ -742,129 +1317,103 @@ function HomePage() {
   return (
     <Layout>
       <div className="home-container">
-        {/* Compact Modern Hero Banner */}
-        <section className="home-hero-banner" aria-label="Hero promotion">
-          <div className="hero-banner-content">
-            <div className="hero-pill">
-              <Zap size={12} /> Fast Delivery Around Chennai
-            </div>
-            <h1>
-              Everyday Essentials,<br />
-              <em>Delivered Fast.</em>
-            </h1>
-            <p className="hero-banner-desc">
-              Kitchen, cleaning and household essentials at affordable prices.
-            </p>
-
-            <div className="hero-delivery-callout">
-              <Clock size={16} />
-              <span>
-                <strong>Fast Delivery Around Chennai:</strong> Eligible local orders may arrive within 12 hours after dispatch.
-              </span>
-            </div>
-
-            <button className="hero-cta-btn" onClick={() => navigate('/products')}>
-              Shop Now <ArrowRight size={16} />
-            </button>
-          </div>
-          <div className="hero-banner-media">
-            <img
-              src="https://images.unsplash.com/photo-1556911220-e15b29be8c8f?auto=format&fit=crop&w=900&q=85"
-              alt="Everyday kitchen and household essentials at Raja Store"
-              fetchPriority="high"
-            />
-          </div>
-        </section>
+        {/* Animated Promo Banner — replaces static hero photo */}
+        <PromoBanner />
 
         {/* Category Quick Access Bar */}
         {categories.length > 0 && (
-          <section className="category-quick-bar" aria-label="Browse by category">
-            <div className="quick-bar-heading">
-              <h3>Shop by Category</h3>
-              <Link to="/products" className="view-all-link">
-                View All Items ({products.length}) <ChevronRight size={15} />
-              </Link>
-            </div>
-            <div className="category-chips-row">
-              <Link
-                to="/products"
-                className="category-chip"
-              >
-                <Grid size={14} />
-                <span>All Items ({products.length})</span>
-              </Link>
-              {categories.map((cat) => {
-                const count = products.filter((p) => p.category.slug === cat.slug).length
-                return (
-                  <Link
-                    key={cat.slug}
-                    to={`/products?category=${cat.slug}`}
-                    className="category-chip"
-                  >
-                    <span>{cat.name}</span>
-                    <span className="chip-count">({count})</span>
-                  </Link>
-                )
-              })}
-            </div>
-          </section>
+          <ScrollRevealSection>
+            <section className="category-quick-bar" aria-label="Browse by category">
+              <div className="quick-bar-heading">
+                <h3>Shop by Category</h3>
+                <Link to="/products" className="view-all-link">
+                  View All Items ({products.length}) <ChevronRight size={15} />
+                </Link>
+              </div>
+              <div className="category-chips-row">
+                <Link
+                  to="/products"
+                  className="category-chip"
+                >
+                  <Grid size={14} />
+                  <span>All Items ({products.length})</span>
+                </Link>
+                {categories.map((cat) => {
+                  const count = products.filter((p) => p.category.slug === cat.slug).length
+                  return (
+                    <Link
+                      key={cat.slug}
+                      to={`/products?category=${cat.slug}`}
+                      className="category-chip"
+                    >
+                      <span>{cat.name}</span>
+                      <span className="chip-count">({count})</span>
+                    </Link>
+                  )
+                })}
+              </div>
+            </section>
+          </ScrollRevealSection>
         )}
 
-        {/* Flipkart-Style 4 Product Horizontal Rows */}
+        {/* Product Horizontal Rows with Scroll Reveal */}
         {homeSections.map((section) => (
-          <FlipkartProductRow
-            key={section.id}
-            title={section.title}
-            subtitle={section.subtitle}
-            viewAllLink={section.viewAllLink}
-            products={section.products}
-            onAdd={handleAdd}
-            onOpen={(slug) => navigate(`/product/${slug}`)}
-          />
+          <ScrollRevealSection key={section.id}>
+            <FlipkartProductRow
+              title={section.title}
+              subtitle={section.subtitle}
+              viewAllLink={section.viewAllLink}
+              products={section.products}
+              onAdd={handleAdd}
+              onOpen={(slug) => navigate(`/product/${slug}`)}
+            />
+          </ScrollRevealSection>
         ))}
 
-        {/* Delivery / Trust Value Strip */}
-        <section className="home-value-strip" aria-label="Why shop with us">
-          <div className="home-value-item">
-            <div className="value-item-icon">
-              <Truck size={22} />
+        {/* Trust / Value Strip */}
+        <ScrollRevealSection>
+          <section className="home-value-strip" aria-label="Why shop with us">
+            <div className="home-value-item">
+              <div className="value-item-icon">
+                <Truck size={22} />
+              </div>
+              <div className="value-item-text">
+                <h4>Fast Chennai Delivery</h4>
+                <p>Eligible local Chennai orders may arrive within 12 hours after dispatch.</p>
+              </div>
             </div>
-            <div className="value-item-text">
-              <h4>Fast Chennai Delivery</h4>
-              <p>Eligible local Chennai orders may arrive within 12 hours after dispatch.</p>
-            </div>
-          </div>
 
-          <div className="home-value-item">
-            <div className="value-item-icon">
-              <CreditCard size={22} />
+            <div className="home-value-item">
+              <div className="value-item-icon">
+                <CreditCard size={22} />
+              </div>
+              <div className="value-item-text">
+                <h4>COD &amp; UPI</h4>
+                <p>Cash on Delivery and easy instant UPI payments supported.</p>
+              </div>
             </div>
-            <div className="value-item-text">
-              <h4>COD &amp; UPI</h4>
-              <p>Cash on Delivery and easy instant UPI payments supported.</p>
-            </div>
-          </div>
 
-          <div className="home-value-item">
-            <div className="value-item-icon">
-              <ShieldCheck size={22} />
+            <div className="home-value-item">
+              <div className="value-item-icon">
+                <ShieldCheck size={22} />
+              </div>
+              <div className="value-item-text">
+                <h4>Secure Ordering</h4>
+                <p>Instant SMS/Email alerts and live order tracking anytime.</p>
+              </div>
             </div>
-            <div className="value-item-text">
-              <h4>Secure Ordering</h4>
-              <p>Instant SMS/Email alerts and live order tracking anytime.</p>
-            </div>
-          </div>
 
-          <div className="home-value-item">
-            <div className="value-item-icon">
-              <Tag size={22} />
+            <div className="home-value-item">
+              <div className="value-item-icon">
+                <Tag size={22} />
+              </div>
+              <div className="value-item-text">
+                <h4>Everyday Affordable Prices</h4>
+                <p>Everyday kitchen, cleaning &amp; home essentials at pocket-friendly prices.</p>
+              </div>
             </div>
-            <div className="value-item-text">
-              <h4>Everyday Affordable Products</h4>
-              <p>Everyday kitchen, cleaning &amp; home essentials at pocket-friendly prices.</p>
-            </div>
-          </div>
-        </section>
+          </section>
+        </ScrollRevealSection>
       </div>
     </Layout>
   )
@@ -890,7 +1439,7 @@ function ProductsPage() {
       const matchCat = activeCategory === 'all' || product.category.slug === activeCategory
       const matchSearch =
         !query ||
-        [product.name, product.category.name, product.description, product.sku].some((v) =>
+        [product.name, product.category.name, product.description, product.shortDescription ?? '', product.sku].some((v) =>
           v.toLowerCase().includes(query)
         )
       return matchCat && matchSearch
@@ -904,6 +1453,17 @@ function ProductsPage() {
       return Number(Boolean(b.isBestSeller)) - Number(Boolean(a.isBestSeller))
     })
   }, [activeCategory, products, searchQuery, sort])
+
+  const fallbackProducts = useMemo(() => {
+    if (products.length === 0) return []
+    const bestsellers = products.filter((p) => p.isBestSeller && p.stock > 0)
+    const newArrivals = products.filter((p) => p.isNew && !p.isBestSeller && p.stock > 0)
+    const others = products.filter((p) => !p.isBestSeller && !p.isNew && p.stock > 0)
+    const outOfStock = products.filter((p) => p.stock === 0)
+    const combined = [...bestsellers, ...newArrivals, ...others, ...outOfStock]
+    const list = combined.length > 0 ? combined : products
+    return list.slice(0, 8)
+  }, [products])
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' })
@@ -935,6 +1495,7 @@ function ProductsPage() {
     description: seoDescription,
     canonical: seoCanonical,
     ogType: 'website',
+    noIndex: Boolean(searchQuery),
   })
 
   function handleAdd(product: Product) {
@@ -948,15 +1509,26 @@ function ProductsPage() {
     setSearchParams(next)
   }
 
+  function handleClearSearch() {
+    const next = new URLSearchParams(searchParams)
+    next.delete('search')
+    setSearchParams(next)
+  }
+
   return (
     <Layout>
       <div className="shop-page-wrapper">
         <div className="catalog-header-bar">
           <div className="catalog-title-line">
             <div>
-              <h1>{searchQuery ? `Results for “${searchQuery}”` : 'Shop Collection'}</h1>
+              {searchQuery && (
+                <p className="search-results-label">
+                  Search results for <strong>&ldquo;{searchQuery}&rdquo;</strong>
+                </p>
+              )}
+              <h1>{searchQuery ? `Search results for \u201C${searchQuery}\u201D` : (currentCategoryName ? `${currentCategoryName} Collection` : 'Shop Collection')}</h1>
               <span className="catalog-item-count">
-                Showing {visibleProducts.length} items
+                Showing {visibleProducts.length} {visibleProducts.length === 1 ? 'item' : 'items'}
               </span>
             </div>
 
@@ -1004,18 +1576,73 @@ function ProductsPage() {
             <p>Fetching everyday essentials from Raja Store.</p>
           </div>
         ) : visibleProducts.length === 0 ? (
-          <div className="state-box">
-            <h3>No products found</h3>
-            <p>We couldn't find anything matching your filters or search.</p>
-            <button
-              className="hero-cta-btn"
-              onClick={() => setSearchParams({})}
-            >
-              Clear All Filters
-            </button>
-          </div>
+          searchQuery ? (
+            <div className="search-no-results-wrap">
+              <div className="search-empty-state">
+                <div className="search-empty-icon">
+                  <Search size={32} />
+                </div>
+                <h2 className="search-empty-title">
+                  No exact products found for <em>&ldquo;{searchQuery}&rdquo;</em>
+                </h2>
+                <p className="search-empty-body">
+                  We couldn't find any products matching your search. Check your spelling or explore recommended essentials below.
+                </p>
+                <div className="search-empty-actions">
+                  <button
+                    type="button"
+                    className="search-empty-clear-btn"
+                    onClick={handleClearSearch}
+                  >
+                    <RotateCcw size={15} /> Clear Search
+                  </button>
+                  <button
+                    type="button"
+                    className="search-empty-browse-btn"
+                    onClick={() => navigate('/products')}
+                  >
+                    <Grid size={15} /> Browse All Products
+                  </button>
+                </div>
+              </div>
+
+              {fallbackProducts.length > 0 && (
+                <section className="you-may-also-like" aria-label="You may also like">
+                  <div className="ymal-heading">
+                    <Sparkles size={18} color="var(--color-primary)" />
+                    <h3>You May Also Like</h3>
+                    <span>Popular everyday essentials from Raja Store</span>
+                  </div>
+                  <div className="ymal-grid catalog-product-grid">
+                    {fallbackProducts.map((product) => (
+                      <ProductCard
+                        key={product.id}
+                        product={product}
+                        onAdd={handleAdd}
+                        onOpen={(slug) => navigate(`/product/${slug}`)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )}
+            </div>
+          ) : (
+            <div className="state-box">
+              <h3>No products found</h3>
+              <p>We couldn't find anything matching your selected category.</p>
+              <button
+                className="hero-cta-btn"
+                onClick={() => setSearchParams({})}
+              >
+                Clear All Filters
+              </button>
+            </div>
+          )
         ) : (
-          <div className="catalog-product-grid">
+          <div
+            className="catalog-product-grid"
+            key={`${searchQuery}-${activeCategory}-${sort}`}
+          >
             {visibleProducts.map((product) => (
               <ProductCard
                 key={product.id}
@@ -1032,7 +1659,7 @@ function ProductsPage() {
 }
 
 /* ==========================================================================
-   PRODUCT DETAIL PAGE (NO HEART BUTTON)
+   PRODUCT DETAIL PAGE
    ========================================================================== */
 function ProductPage() {
   const { slug } = useParams()
@@ -1044,6 +1671,7 @@ function ProductPage() {
   const [selectedImage, setSelectedImage] = useState(0)
   const [quantity, setQuantity] = useState(1)
   const [selectedVariant, setSelectedVariant] = useState(product?.variants[0]?.id ?? '')
+  const [isAddedFeedback, setIsAddedFeedback] = useState(false)
 
   useEffect(() => {
     window.scrollTo(0, 0)
@@ -1137,35 +1765,73 @@ function ProductPage() {
   const discount = getDiscountPercent(product.price, product.compareAtPrice)
 
   function handleAdd() {
-    if (!product) return
+    if (!product || availableStock === 0) return
     addToCart(product, quantity, selectedVariantData)
+    setIsAddedFeedback(true)
+    setTimeout(() => {
+      setIsAddedFeedback(false)
+    }, 1500)
   }
 
   return (
     <Layout>
       <div className="detail-container">
-        <Link to="/products" className="breadcrumb-back">
-          <ArrowLeft size={16} /> Back to Collection
-        </Link>
+        <nav className="detail-breadcrumb" aria-label="Breadcrumb">
+          <Link to="/products" className="breadcrumb-back">
+            <ArrowLeft size={16} /> Back to Collection
+          </Link>
+          <span className="breadcrumb-separator">/</span>
+          <Link to={`/products?category=${product.category.slug}`} className="breadcrumb-cat">
+            {product.category.name}
+          </Link>
+        </nav>
 
         <div className="detail-grid">
           {/* Gallery Column */}
           <div className="detail-gallery-col">
             <div className="detail-main-img-wrap">
               <img
+                key={selectedImage}
+                className="gallery-main-img"
                 src={product.images[selectedImage] ?? product.images[0]}
                 alt={`${product.name} - Everyday Essentials at Raja Store`}
               />
+
+              {product.images.length > 1 && (
+                <>
+                  <button
+                    type="button"
+                    className="gallery-nav-btn prev"
+                    onClick={() => setSelectedImage((curr) => (curr <= 0 ? product.images.length - 1 : curr - 1))}
+                    aria-label="Previous image"
+                  >
+                    <ChevronLeft size={20} />
+                  </button>
+                  <button
+                    type="button"
+                    className="gallery-nav-btn next"
+                    onClick={() => setSelectedImage((curr) => (curr >= product.images.length - 1 ? 0 : curr + 1))}
+                    aria-label="Next image"
+                  >
+                    <ChevronRight size={20} />
+                  </button>
+                </>
+              )}
             </div>
+
             {product.images.length > 1 && (
-              <div className="thumbnails-strip">
+              <div className="thumbnails-strip" role="tablist" aria-label="Product image thumbnails">
                 {product.images.map((img, idx) => (
                   <button
                     key={img}
+                    type="button"
                     className={`thumb-btn ${selectedImage === idx ? 'active' : ''}`}
                     onClick={() => setSelectedImage(idx)}
+                    role="tab"
+                    aria-selected={selectedImage === idx}
+                    aria-label={`View image ${idx + 1} of ${product.images.length}`}
                   >
-                    <img src={img} alt={`${product.name} view ${idx + 1}`} loading="lazy" />
+                    <img src={img} alt="" loading="lazy" />
                   </button>
                 ))}
               </div>
@@ -1175,100 +1841,200 @@ function ProductPage() {
           {/* Details Column */}
           <div className="detail-info-col">
             <div className="detail-cat-sku">
-              {product.category.name} • SKU: {product.sku}
+              <Link to={`/products?category=${product.category.slug}`} className="detail-cat-link">
+                {product.category.name}
+              </Link>
+              {product.sku && <span className="detail-sku">• SKU: {product.sku}</span>}
             </div>
 
             <h1 className="detail-title">{product.name}</h1>
 
-            <div className="detail-rating-stock">
-              <span className="rating-pill">
-                <Star size={12} /> {product.rating}
-              </span>
-              <span style={{ fontSize: '13px', color: availableStock > 0 ? 'var(--color-success)' : 'var(--color-error)', fontWeight: 600 }}>
-                {availableStock > 0 ? `In Stock (${availableStock} available)` : 'Out of stock'}
-              </span>
+            <div className="detail-status-row">
+              {product.rating > 0 && (
+                <span className="rating-pill" title={`Rated ${product.rating} out of 5`}>
+                  <Star size={12} fill="currentColor" /> {product.rating}
+                </span>
+              )}
+              {availableStock === 0 ? (
+                <span className="stock-pill out-of-stock">
+                  <AlertCircle size={13} /> Out of stock
+                </span>
+              ) : availableStock <= 5 ? (
+                <span className="stock-pill low-stock">
+                  <Clock size={13} /> Only {availableStock} left in stock
+                </span>
+              ) : (
+                <span className="stock-pill in-stock">
+                  <Check size={13} /> In Stock ({availableStock} available)
+                </span>
+              )}
+              {product.isBestSeller && <span className="detail-badge-pill bestseller">Bestseller</span>}
+              {product.isNew && <span className="detail-badge-pill new">New Arrival</span>}
             </div>
 
             <div className="detail-price-box">
-              <span className="detail-current-price">{formatPrice(product.price)}</span>
-              {product.compareAtPrice && product.compareAtPrice > product.price && (
-                <span className="detail-original-price">{formatPrice(product.compareAtPrice)}</span>
-              )}
-              {discount > 0 && <span className="detail-discount-tag">{discount}% OFF</span>}
+              <div className="price-main-row">
+                <span className="detail-current-price">{formatPrice(product.price)}</span>
+                {product.compareAtPrice && product.compareAtPrice > product.price && (
+                  <span className="detail-original-price">{formatPrice(product.compareAtPrice)}</span>
+                )}
+                {discount > 0 && (
+                  <span className="detail-discount-tag">Save {discount}%</span>
+                )}
+              </div>
+              <span className="price-tax-inclusive">Inclusive of all taxes</span>
             </div>
 
-            <p className="detail-desc">{product.description}</p>
+            {product.shortDescription && (
+              <p className="detail-short-desc">{product.shortDescription}</p>
+            )}
+
+            <div className="detail-desc-wrap">
+              <h3 className="detail-section-label">Product Description</h3>
+              <p className="detail-desc">{product.description}</p>
+            </div>
 
             {/* Variant selector */}
             {product.variants.length > 0 && (
               <div className="variant-picker">
-                <label>Select Option:</label>
-                <div className="variant-pills">
-                  {product.variants.map((v) => (
-                    <button
-                      key={v.id}
-                      type="button"
-                      className={`variant-pill ${selectedVariant === v.id ? 'selected' : ''}`}
-                      onClick={() => {
-                        setSelectedVariant(v.id)
-                        setQuantity(1)
-                      }}
-                    >
-                      {v.label} ({v.stock > 0 ? `${v.stock} in stock` : 'Out of stock'})
-                    </button>
-                  ))}
+                <div className="variant-picker-header">
+                  <label id="variant-label">Select Option:</label>
+                  {selectedVariantData && (
+                    <span className="selected-variant-name">{selectedVariantData.label}</span>
+                  )}
+                </div>
+                <div className="variant-pills" role="radiogroup" aria-labelledby="variant-label">
+                  {product.variants.map((v) => {
+                    const isSelected = selectedVariant === v.id
+                    const isVarOut = v.stock === 0
+                    return (
+                      <button
+                        key={v.id}
+                        type="button"
+                        className={`variant-pill ${isSelected ? 'selected' : ''} ${isVarOut ? 'out-of-stock' : ''}`}
+                        onClick={() => {
+                          setSelectedVariant(v.id)
+                          setQuantity(1)
+                        }}
+                        role="radio"
+                        aria-checked={isSelected}
+                        disabled={isVarOut}
+                      >
+                        <span className="variant-pill-label">{v.label}</span>
+                        <span className="variant-pill-stock">
+                          {isVarOut ? 'Out of stock' : `${v.stock} in stock`}
+                        </span>
+                      </button>
+                    )
+                  })}
                 </div>
               </div>
             )}
 
             {/* Quantity and Add to Cart */}
             <div className="detail-cta-row">
-              <div className="qty-stepper">
+              <div className="qty-stepper" role="group" aria-label="Quantity selector">
                 <button
                   type="button"
                   disabled={quantity <= 1}
                   onClick={() => setQuantity((q) => Math.max(1, q - 1))}
                   aria-label="Decrease quantity"
+                  className="qty-btn"
                 >
                   −
                 </button>
-                <span>{quantity}</span>
+                <span className="qty-value" aria-live="polite" aria-label={`Current quantity ${quantity}`}>
+                  {quantity}
+                </span>
                 <button
                   type="button"
                   disabled={quantity >= availableStock}
                   onClick={() => setQuantity((q) => Math.min(availableStock, q + 1))}
                   aria-label="Increase quantity"
+                  className="qty-btn"
                 >
                   +
                 </button>
               </div>
 
               <button
-                className="detail-add-btn"
+                className={`detail-add-btn ${isAddedFeedback ? 'is-added' : ''}`}
                 disabled={availableStock === 0}
                 onClick={handleAdd}
+                aria-label={availableStock === 0 ? 'Out of stock' : `Add ${quantity} to bag`}
               >
-                <ShoppingBag size={18} />
-                {availableStock === 0 ? 'Out of stock' : 'Add to Bag'}
+                {isAddedFeedback ? (
+                  <>
+                    <Check size={18} /> Added to Bag!
+                  </>
+                ) : availableStock === 0 ? (
+                  'Out of Stock'
+                ) : (
+                  <>
+                    <ShoppingBag size={18} /> Add to Bag
+                  </>
+                )}
               </button>
             </div>
 
-            {/* Trust Assurances */}
-            <div className="trust-badges-grid">
+            {/* Trust Assurances (Truthful store information only) */}
+            <div className="trust-badges-grid" aria-label="Store highlights">
               <div className="trust-item">
-                <Truck size={18} />
-                <span>Fast Dispatched in 24-48 hrs</span>
+                <div className="trust-item-icon">
+                  <Truck size={18} />
+                </div>
+                <div className="trust-item-text">
+                  <strong>Fast Chennai Delivery</strong>
+                  <span>Eligible orders dispatched fast</span>
+                </div>
               </div>
               <div className="trust-item">
-                <CreditCard size={18} />
-                <span>Cash on Delivery Available</span>
+                <div className="trust-item-icon">
+                  <CreditCard size={18} />
+                </div>
+                <div className="trust-item-text">
+                  <strong>COD &amp; Instant UPI</strong>
+                  <span>Cash on Delivery &amp; UPI supported</span>
+                </div>
               </div>
               <div className="trust-item">
-                <RotateCcw size={18} />
-                <span>Easy 7-Day Returns</span>
+                <div className="trust-item-icon">
+                  <ShieldCheck size={18} />
+                </div>
+                <div className="trust-item-text">
+                  <strong>Secure Ordering</strong>
+                  <span>SMS/Email alerts with live order tracking</span>
+                </div>
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Mobile Sticky CTA Bar */}
+        <div className="mobile-sticky-cta-bar" aria-label="Quick purchase">
+          <div className="sticky-cta-info">
+            <span className="sticky-cta-price">{formatPrice(product.price)}</span>
+            <span className="sticky-cta-stock">
+              {availableStock > 0 ? `${availableStock} available` : 'Out of stock'}
+            </span>
+          </div>
+          <button
+            className={`mobile-sticky-add-btn ${isAddedFeedback ? 'is-added' : ''}`}
+            disabled={availableStock === 0}
+            onClick={handleAdd}
+          >
+            {isAddedFeedback ? (
+              <>
+                <Check size={16} /> Added!
+              </>
+            ) : availableStock === 0 ? (
+              'Out of Stock'
+            ) : (
+              <>
+                <ShoppingBag size={16} /> Add to Bag
+              </>
+            )}
+          </button>
         </div>
 
         {/* Related Products Section */}
@@ -1308,7 +2074,7 @@ function ProductPage() {
 function CartDeliveryProgress({ subtotal }: { subtotal: number }) {
   if (subtotal <= 0) return null
 
-  const percent = Math.min(100, Math.round((subtotal / 300) * 100))
+  const percent = Math.min(100, Math.round((subtotal / 200) * 100))
 
   return (
     <div className="cart-delivery-banner" role="status">
@@ -1318,42 +2084,32 @@ function CartDeliveryProgress({ subtotal }: { subtotal: number }) {
             <>
               <span className="progress-icon">📦</span>
               <span>
-                Add <strong>{formatPrice(200 - subtotal)}</strong> more to place your order
-              </span>
-            </>
-          ) : subtotal < 300 ? (
-            <>
-              <Truck size={15} className="progress-icon-truck" />
-              <span>
-                Add <strong>{formatPrice(300 - subtotal)}</strong> more for <strong>FREE delivery</strong>
+                Add <strong>{formatPrice(200 - subtotal)}</strong> more to place your order (Free Delivery)
               </span>
             </>
           ) : (
             <>
               <span className="progress-check">✓</span>
               <span className="progress-unlocked">
-                FREE delivery unlocked
+                FREE delivery unlocked on this order!
               </span>
             </>
           )}
         </div>
-        <span className="progress-subtotal">{formatPrice(subtotal)} / ₹300</span>
+        <span className="progress-subtotal">{formatPrice(subtotal)} / ₹200</span>
       </div>
 
       <div className="progress-track-wrapper">
         <div className="progress-track" aria-hidden="true">
           <div
-            className={`progress-fill ${subtotal >= 300 ? 'complete' : ''}`}
+            className={`progress-fill ${subtotal >= 200 ? 'complete' : ''}`}
             style={{ width: `${percent}%` }}
           />
         </div>
         <div className="progress-milestones">
           <span>₹0</span>
-          <span className={`milestone-tag ${subtotal >= 200 ? (subtotal >= 300 ? 'completed' : 'active') : ''}`}>
-            ₹200 Min Order {subtotal >= 200 ? '✓' : ''}
-          </span>
-          <span className={`milestone-tag ${subtotal >= 300 ? 'completed' : ''}`}>
-            ₹300 Free Delivery {subtotal >= 300 ? '✓' : ''}
+          <span className={`milestone-tag ${subtotal >= 200 ? 'completed' : 'active'}`}>
+            ₹200 Min Order &amp; Free Delivery {subtotal >= 200 ? '✓' : ''}
           </span>
         </div>
       </div>
@@ -1369,10 +2125,9 @@ function CartPage() {
   const { cartItems, updateQuantity, removeFromCart, getCartItemCount, getCartSubtotal } = useCart()
   const navigate = useNavigate()
   const subtotal = getCartSubtotal()
-  const delivery = Number(import.meta.env.VITE_DELIVERY_CHARGE ?? 50)
-  const isFreeDelivery = subtotal >= 300
-  const deliveryFee = isFreeDelivery ? 0 : delivery
-  const total = subtotal + deliveryFee
+  const deliveryFee = 0
+  const total = subtotal
+  const count = getCartItemCount()
 
   return (
     <Layout>
@@ -1380,18 +2135,45 @@ function CartPage() {
         <div className="cart-header-title">
           <h1>Shopping Bag</h1>
           <p>
-            {getCartItemCount()} {getCartItemCount() === 1 ? 'item' : 'items'} in your bag
+            {count} {count === 1 ? 'item' : 'items'} in your bag
           </p>
         </div>
 
         {cartItems.length === 0 ? (
-          <div className="state-box">
-            <ShoppingBag size={42} style={{ color: 'var(--color-primary)', margin: '0 auto 16px' }} />
-            <h3>Your shopping bag is empty</h3>
-            <p>Discover our range of everyday household essentials.</p>
-            <button className="hero-cta-btn" onClick={() => navigate('/products')}>
-              Start Shopping <ArrowRight size={16} />
-            </button>
+          <div className="cart-empty-state">
+            <div className="cart-empty-icon-wrap">
+              <ShoppingBag size={44} className="cart-empty-icon" />
+            </div>
+            <h2 className="cart-empty-title">Your shopping bag is empty</h2>
+            <p className="cart-empty-desc">
+              Discover our range of everyday household and kitchen essentials delivered fast in Chennai.
+            </p>
+            <div className="cart-empty-actions">
+              <button
+                type="button"
+                className="cart-empty-cta-btn"
+                onClick={() => navigate('/products')}
+              >
+                <ShoppingBag size={17} /> Start Shopping <ArrowRight size={16} />
+              </button>
+            </div>
+            <div className="cart-empty-categories">
+              <span className="empty-cat-label">Popular Categories:</span>
+              <div className="empty-cat-pills">
+                <Link to="/products?category=kitchen" className="empty-cat-pill">
+                  Kitchen
+                </Link>
+                <Link to="/products?category=everyday" className="empty-cat-pill">
+                  Everyday
+                </Link>
+                <Link to="/products?category=home" className="empty-cat-pill">
+                  Home
+                </Link>
+                <Link to="/products?category=wellness" className="empty-cat-pill">
+                  Wellness
+                </Link>
+              </div>
+            </div>
           </div>
         ) : (
           <>
@@ -1401,40 +2183,61 @@ function CartPage() {
               <div className="cart-items-column">
                 {cartItems.map((item) => (
                   <div className="cart-item-card" key={item.key}>
-                    <img src={item.product.images[0]} alt={item.product.name} />
+                    <Link to={`/product/${item.product.slug}`} className="cart-item-img-wrap" aria-label={item.product.name}>
+                      <img src={item.product.images[0]} alt={item.product.name} loading="lazy" />
+                    </Link>
 
                     <div className="cart-item-details">
-                      <h3>{item.product.name}</h3>
-                      {item.variant && <p className="cart-item-variant">Option: {item.variant.label}</p>}
-                      <span className="cart-item-price">{formatPrice(item.product.price)}</span>
+                      <Link to={`/product/${item.product.slug}`} className="cart-item-name">
+                        {item.product.name}
+                      </Link>
+                      {item.variant && (
+                        <span className="cart-item-variant-pill">
+                          Option: <strong>{item.variant.label}</strong>
+                        </span>
+                      )}
+                      <div className="cart-item-price-row">
+                        <span className="cart-item-unit-price">
+                          {formatPrice(item.product.price)} each
+                        </span>
+                      </div>
                     </div>
 
                     <div className="cart-item-actions">
-                      <div className="qty-stepper">
+                      <div className="cart-item-subtotal">
+                        {formatPrice(item.product.price * item.quantity)}
+                      </div>
+
+                      <div className="qty-stepper cart-qty-stepper" role="group" aria-label="Quantity selector">
                         <button
                           type="button"
                           disabled={item.quantity <= 1}
                           onClick={() => updateQuantity(item.key, item.quantity - 1)}
-                          aria-label="Decrease quantity"
+                          aria-label={`Decrease quantity of ${item.product.name}`}
+                          className="qty-btn"
                         >
                           −
                         </button>
-                        <span>{item.quantity}</span>
+                        <span className="qty-value">{item.quantity}</span>
                         <button
                           type="button"
                           disabled={item.quantity >= (item.variant?.stock ?? item.product.stock)}
                           onClick={() => updateQuantity(item.key, item.quantity + 1)}
-                          aria-label="Increase quantity"
+                          aria-label={`Increase quantity of ${item.product.name}`}
+                          className="qty-btn"
                         >
                           +
                         </button>
                       </div>
 
                       <button
-                        className="remove-btn"
+                        type="button"
+                        className="cart-remove-btn"
                         onClick={() => removeFromCart(item.key)}
+                        aria-label={`Remove ${item.product.name} from bag`}
                       >
-                        Remove
+                        <Trash2 size={13} />
+                        <span>Remove</span>
                       </button>
                     </div>
                   </div>
@@ -1450,7 +2253,9 @@ function CartPage() {
                 </div>
                 <div className="summary-row">
                   <span>Delivery Charge</span>
-                  <span>{isFreeDelivery ? 'FREE' : formatPrice(deliveryFee)}</span>
+                  <span className="delivery-free-pill">
+                    FREE
+                  </span>
                 </div>
                 <div className="summary-row total">
                   <span>Estimated Total</span>
@@ -1458,16 +2263,14 @@ function CartPage() {
                 </div>
 
                 {subtotal < 200 ? (
-                  <div className="cart-min-order-note">
-                    Add {formatPrice(200 - subtotal)} more to place your order
-                  </div>
-                ) : subtotal < 300 ? (
-                  <div className="cart-min-order-note" style={{ color: 'var(--color-primary)' }}>
-                    Add {formatPrice(300 - subtotal)} more for FREE delivery
+                  <div className="cart-min-order-note warning">
+                    <AlertCircle size={14} />
+                    <span>Add {formatPrice(200 - subtotal)} more to place your order (min ₹200)</span>
                   </div>
                 ) : (
-                  <div className="cart-min-order-note" style={{ color: 'var(--color-success)' }}>
-                    ✓ FREE delivery unlocked
+                  <div className="cart-min-order-note success">
+                    <Check size={14} />
+                    <span><strong>FREE delivery</strong> on all orders of ₹200 or more</span>
                   </div>
                 )}
 
@@ -1479,6 +2282,21 @@ function CartPage() {
                   {subtotal < 200 ? `Add ${formatPrice(200 - subtotal)} to Order` : 'Proceed to Checkout'}{' '}
                   <ArrowRight size={16} />
                 </button>
+
+                <div className="summary-trust-strip">
+                  <div className="summary-trust-item">
+                    <ShieldCheck size={14} />
+                    <span>Safe &amp; Encrypted Ordering</span>
+                  </div>
+                  <div className="summary-trust-item">
+                    <CreditCard size={14} />
+                    <span>COD &amp; Instant UPI Supported</span>
+                  </div>
+                  <div className="summary-trust-item">
+                    <Clock size={14} />
+                    <span>Live SMS/Email Order Tracking</span>
+                  </div>
+                </div>
               </aside>
             </div>
           </>
@@ -1573,10 +2391,8 @@ function CheckoutPage() {
   const proofRef = useRef<HTMLInputElement>(null)
 
   const subtotal = getCartSubtotal()
-  const delivery = Number(import.meta.env.VITE_DELIVERY_CHARGE ?? 50)
-  const isFreeDelivery = subtotal >= 300
-  const deliveryFee = isFreeDelivery ? 0 : delivery
-  const total = subtotal + deliveryFee
+  const deliveryFee = 0
+  const total = subtotal
 
   // Auto-save form fields to sessionStorage
   useEffect(() => {
@@ -2078,7 +2894,7 @@ function CheckoutPage() {
 
               <div className="checkout-line-item">
                 <span>Delivery Charge</span>
-                <span>{isFreeDelivery ? 'FREE' : formatPrice(deliveryFee)}</span>
+                <span className="delivery-free-pill">FREE</span>
               </div>
 
               <div className="checkout-line-item total">
@@ -2089,10 +2905,6 @@ function CheckoutPage() {
               {subtotal < 200 ? (
                 <div className="checkout-delivery-note below-min">
                   Add {formatPrice(200 - subtotal)} more to place your order (Minimum order ₹200).
-                </div>
-              ) : subtotal < 300 ? (
-                <div className="checkout-delivery-note free-eligible">
-                  Add {formatPrice(300 - subtotal)} more for FREE delivery.
                 </div>
               ) : (
                 <div className="checkout-delivery-note free-unlocked">
