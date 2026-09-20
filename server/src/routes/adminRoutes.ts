@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import express, { Router } from 'express'
 import multer from 'multer'
 import rateLimit from 'express-rate-limit'
 
@@ -81,7 +81,7 @@ export function createAdminRoutes(
   adminRoutes.patch('/products/:productId/stock', updateAdminStock)
   adminRoutes.delete('/products/:productId', productImages.deleteProduct)
   adminRoutes.post('/products/bulk-upload-image', bulkImageUpload.array('images', 10), productImages.bulkUploadImages)
-  adminRoutes.post('/products/bulk-import', productImages.bulkImport)
+  adminRoutes.post('/products/bulk-import', express.json({ limit: '2mb' }), productImages.bulkImport)
 
   return adminRoutes
 }

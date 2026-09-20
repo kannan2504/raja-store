@@ -30,6 +30,7 @@ const environmentSchema = z.object({
   GMAIL_SMTP_USER: z.string().trim().email().optional().or(z.literal('')),
   GMAIL_SMTP_APP_PASSWORD: z.string().trim().optional().or(z.literal('')),
   RESEND_API_KEY: z.string().trim().optional().default(''),
+  RESEND_FROM_EMAIL: z.string().trim().email().optional().or(z.literal('')).default(''),
   CLOUDINARY_CLOUD_NAME: z.string().optional().default(''),
   CLOUDINARY_API_KEY: z.string().optional().default(''),
   CLOUDINARY_API_SECRET: z.string().optional().default(''),
@@ -41,6 +42,7 @@ const environmentSchema = z.object({
     ['ADMIN_API_TOKEN', 'ADMIN_API_TOKEN is required in production.'],
     ['ADMIN_NOTIFICATION_EMAIL', 'ADMIN_NOTIFICATION_EMAIL is required in production.'],
     ['RESEND_API_KEY', 'RESEND_API_KEY is required in production.'],
+    ['RESEND_FROM_EMAIL', 'RESEND_FROM_EMAIL is required in production.'],
     ['CLOUDINARY_CLOUD_NAME', 'CLOUDINARY_CLOUD_NAME is required in production.'],
     ['CLOUDINARY_API_KEY', 'CLOUDINARY_API_KEY is required in production.'],
     ['CLOUDINARY_API_SECRET', 'CLOUDINARY_API_SECRET is required in production.'],
@@ -51,6 +53,15 @@ const environmentSchema = z.object({
     if (typeof value !== 'string' || !value.trim()) {
       context.addIssue({ code: 'custom', path: [key], message })
     }
+  }
+
+  const adminToken = typeof configuration.ADMIN_API_TOKEN === 'string' ? configuration.ADMIN_API_TOKEN.trim() : ''
+  if (adminToken && adminToken.length < 32) {
+    context.addIssue({
+      code: 'custom',
+      path: ['ADMIN_API_TOKEN'],
+      message: 'ADMIN_API_TOKEN must be at least 32 characters long in production.',
+    })
   }
 
   if (configuration.PERSISTENCE_MODE !== 'mongo') {

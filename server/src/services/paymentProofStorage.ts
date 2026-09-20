@@ -110,7 +110,11 @@ export class CloudinaryPrivatePaymentProofStorage implements PaymentProofStorage
   async get(proofFileId: string): Promise<PaymentProofStreamResult> {
     if (proofFileId.startsWith('cloudinary:')) {
       const publicId = proofFileId.slice('cloudinary:'.length)
-      if (!publicId || !/^[a-zA-Z0-9_\-\/]+$/.test(publicId)) {
+      if (
+        !publicId ||
+        !publicId.startsWith('raja-store/payment-proofs/') ||
+        !/^[a-zA-Z0-9_\-\/]+$/.test(publicId)
+      ) {
         throw new HttpError(404, 'PROOF_NOT_FOUND', 'Payment proof not found.')
       }
 
@@ -141,6 +145,7 @@ export class CloudinaryPrivatePaymentProofStorage implements PaymentProofStorage
   async delete(proofFileId: string): Promise<void> {
     if (proofFileId.startsWith('cloudinary:')) {
       const publicId = proofFileId.slice('cloudinary:'.length)
+      if (!publicId.startsWith('raja-store/payment-proofs/')) return
       try {
         await cloudinary.uploader.destroy(publicId, {
           resource_type: 'image',

@@ -46,8 +46,8 @@ export function isValidProductImageReference(value: unknown): value is string {
   if (typeof value !== 'string') return false
   // Legacy local UUID format: 36-character uuid.ext
   if (/^[0-9a-f-]{36}\.(jpg|jpeg|png|webp)$/i.test(value)) return true
-  // Cloudinary reference format: cloudinary:<public_id>
-  if (/^cloudinary:[a-zA-Z0-9_\-\/]+$/i.test(value)) return true
+  // Cloudinary reference format: strictly scoped to raja-store/products/
+  if (/^cloudinary:raja-store\/products\/[a-zA-Z0-9_\-\/]+$/i.test(value)) return true
   // Full HTTP/HTTPS URLs (if any exist)
   if (/^https?:\/\//i.test(value)) return true
   return false
@@ -64,6 +64,9 @@ export function serializeProductImage(
   }
   if (image.startsWith('cloudinary:')) {
     const publicId = image.slice('cloudinary:'.length)
+    if (!publicId.startsWith('raja-store/products/')) {
+      return `/api/products/${productId}/images/${image}`
+    }
     if (cloudName?.trim()) {
       return `https://res.cloudinary.com/${cloudName.trim()}/image/upload/${publicId}`
     }
@@ -142,7 +145,11 @@ export class CloudinaryProductImageStorage implements ProductImageStorage {
   get(reference: string): ProductImageResult {
     if (reference.startsWith('cloudinary:')) {
       const publicId = reference.slice('cloudinary:'.length)
-      if (!publicId || !/^[a-zA-Z0-9_\-\/]+$/.test(publicId)) {
+      if (
+        !publicId ||
+        !publicId.startsWith('raja-store/products/') ||
+        !/^[a-zA-Z0-9_\-\/]+$/.test(publicId)
+      ) {
         throw new HttpError(404, 'IMAGE_NOT_FOUND', 'Product image not found.')
       }
       return {
@@ -156,6 +163,7 @@ export class CloudinaryProductImageStorage implements ProductImageStorage {
   async delete(reference: string): Promise<void> {
     if (reference.startsWith('cloudinary:')) {
       const publicId = reference.slice('cloudinary:'.length)
+      if (!publicId.startsWith('raja-store/products/')) return
       try {
         await cloudinary.uploader.destroy(publicId, { resource_type: 'image', invalidate: true })
       } catch {

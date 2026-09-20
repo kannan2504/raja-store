@@ -33,11 +33,17 @@ export class DevelopmentWhatsAppProvider implements WhatsAppProvider {
 }
 
 export class ResendEmailProvider implements EmailProvider {
+  constructor(private readonly fromEmail?: string, private readonly apiKey?: string) {}
+
   async send(notification: AdminOrderNotification) {
     const recipient = notification.recipients.email?.trim()
     if (!recipient) throw new Error('ADMIN_NOTIFICATION_EMAIL is not configured')
-    const apiKey = env.RESEND_API_KEY?.trim()
+    const apiKey = (this.apiKey ?? env.RESEND_API_KEY)?.trim()
     if (!apiKey) throw new Error('RESEND_API_KEY is not configured')
+
+    const configuredFrom = (this.fromEmail ?? env.RESEND_FROM_EMAIL)?.trim()
+    const from = configuredFrom || (env.NODE_ENV === 'production' ? '' : 'onboarding@resend.dev')
+    if (!from) throw new Error('RESEND_FROM_EMAIL is not configured')
 
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -46,7 +52,7 @@ export class ResendEmailProvider implements EmailProvider {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        from: 'onboarding@resend.dev',
+        from,
         to: [recipient],
         subject: `New Raja Store order ${notification.orderId}`,
         text: notification.message,

@@ -47,8 +47,7 @@ export function makeApp(
   const isAllowedOrigin = (origin: string) => {
     if (allowedOrigins.has(origin)) return true
     try {
-      const url = new URL(origin)
-      return url.protocol === 'https:' && url.hostname.endsWith('.chatgpt.site')
+      return allowedOrigins.has(new URL(origin).origin)
     } catch {
       return false
     }
@@ -77,7 +76,15 @@ export function makeApp(
     maxAge: 86400,
   }))
 
-  application.use(express.json({ limit: '50kb' }))
+  application.use((request, response, next) => {
+    if (
+      request.method === 'POST' &&
+      (request.path === '/api/admin/products/bulk-import' || request.path === '/api/admin/products/bulk-import/')
+    ) {
+      return next()
+    }
+    return express.json({ limit: '50kb' })(request, response, next)
+  })
 
   application.get('/api/health', (_request, response) => {
     const ready = persistenceMode !== 'mongo' || isDatabaseConnected()
