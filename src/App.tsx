@@ -2998,22 +2998,51 @@ function TrackOrderPage() {
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(false)
 
+  function normalizeOrderId(id: string): string {
+    return id.trim().toUpperCase().replace(/^#/, '')
+  }
+
+  function normalizePhone(rawPhone: string): string {
+    return rawPhone.replace(/\D/g, '').slice(-10)
+  }
+
   async function lookup(id: string, mobile: string) {
+    const cleanId = normalizeOrderId(id)
+    const cleanPhone = normalizePhone(mobile)
+
+    if (!cleanId) {
+      setError('Please enter your Order ID.')
+      return
+    }
+    if (!/^ORD-\d{4}-\d{6}$/.test(cleanId)) {
+      setError('Please enter a valid Order ID format (e.g. ORD-2026-000001).')
+      return
+    }
+    if (!cleanPhone) {
+      setError('Please enter your mobile number.')
+      return
+    }
+    if (!/^[6-9]\d{9}$/.test(cleanPhone)) {
+      setError('Please enter a valid 10-digit mobile number used at checkout.')
+      return
+    }
+
     setLoading(true)
     setError('')
     try {
-      const data = await trackOrder(id.trim(), mobile.trim())
+      const data = await trackOrder(cleanId, cleanPhone)
       setOrder(data)
       if (data.status) {
         updateMyOrderStatus(data.orderId, data.status)
       }
       sessionStorage.setItem(
         'raja-store-tracking-lookup',
-        JSON.stringify({ orderId: id.trim(), phone: mobile.trim() })
+        JSON.stringify({ orderId: cleanId, phone: cleanPhone })
       )
-    } catch {
+    } catch (err) {
       setOrder(undefined)
-      setError('Could not locate your order. Please check the Order ID and mobile number.')
+      const msg = err instanceof Error ? err.message : 'Could not locate your order. Please check the Order ID and mobile number.'
+      setError(msg)
     } finally {
       setLoading(false)
     }
@@ -3024,9 +3053,13 @@ function TrackOrderPage() {
       const saved = JSON.parse(
         sessionStorage.getItem('raja-store-tracking-lookup') ?? 'null'
       ) as { orderId?: string; phone?: string } | null
-      if (saved?.orderId && saved.phone) {
+      if (saved?.orderId) {
         setOrderId(saved.orderId)
+      }
+      if (saved?.phone) {
         setPhone(saved.phone)
+      }
+      if (saved?.orderId && saved.phone) {
         void lookup(saved.orderId, saved.phone)
       }
     } catch {
@@ -3049,14 +3082,14 @@ function TrackOrderPage() {
           <h1>Track Your Order</h1>
           <p>Enter your Order ID (from your confirmation) and the 10-digit mobile number used at checkout.</p>
 
-          <form className="tracking-search-form" onSubmit={handleSubmit}>
+          <form className="tracking-search-form" onSubmit={handleSubmit} noValidate>
             <div className="field-group">
               <label htmlFor="trackId">Order ID</label>
               <input
                 id="trackId"
                 className="field-input"
                 required
-                pattern="ORD-[0-9]{4}-[0-9]{6}"
+                autoComplete="off"
                 placeholder="ORD-2026-000001"
                 value={orderId}
                 onChange={(e) => setOrderId(e.target.value)}
@@ -3069,9 +3102,9 @@ function TrackOrderPage() {
                 id="trackPhone"
                 className="field-input"
                 required
-                pattern="[6-9][0-9]{9}"
                 placeholder="9876543210"
-                inputMode="numeric"
+                inputMode="tel"
+                autoComplete="tel"
                 value={phone}
                 onChange={(e) => setPhone(e.target.value)}
               />
