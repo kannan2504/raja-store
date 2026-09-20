@@ -132,7 +132,21 @@ export class OrderService {
   async trackOrder(orderId: string, phone: string) {
     const order = await this.orders.findByOrderId(orderId)
     if (!order || order.customer.phone !== phone) throw new HttpError(404, 'ORDER_VERIFICATION_FAILED', 'Unable to verify the order details.')
-    return { orderId: order.orderId, status: order.orderStatus, payment: { method: order.payment.method, status: order.payment.status }, items: order.items.map(({ productId: _productId, skuSnapshot, ...item }) => item), subtotal: order.pricing.subtotal, deliveryCharge: order.pricing.deliveryCharge, total: order.pricing.total, shippingAddress: { address: order.customer.address, city: order.customer.city, state: order.customer.state, pincode: order.customer.pincode } }
+    return {
+      orderId: order.orderId,
+      status: order.orderStatus,
+      payment: { method: order.payment.method, status: order.payment.status },
+      items: order.items.map(({ productId: _productId, skuSnapshot, ...item }) => item),
+      subtotal: order.pricing.subtotal,
+      deliveryCharge: order.pricing.deliveryCharge,
+      total: order.pricing.total,
+      shippingAddress: {
+        address: 'Address protected',
+        city: order.customer.city,
+        state: order.customer.state,
+        pincode: order.customer.pincode,
+      },
+    }
   }
 }
 
