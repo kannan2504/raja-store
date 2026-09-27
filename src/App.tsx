@@ -71,46 +71,214 @@ function useTheme() {
 }
 
 /* ==========================================================================
-   CATALOG DATA HOOK (WITH IN-MEMORY DEDUPLICATION CACHE)
+   CATALOG DATA HOOK (WITH STALE-WHILE-REVALIDATE SESSION CACHE & 5-MIN TTL)
    ========================================================================== */
-let cachedProducts: Product[] = []
-let catalogFetchPromise: Promise<Product[]> | null = null
+type CatalogStatus = 'idle' | 'loading' | 'success' | 'error'
 
-function getCachedProducts(): Promise<Product[]> {
-  if (cachedProducts.length > 0) return Promise.resolve(cachedProducts)
-  if (catalogFetchPromise) return catalogFetchPromise
-  catalogFetchPromise = getProducts().then((res) => {
-    cachedProducts = res
-    catalogFetchPromise = null
-    return res
-  })
+const SESSION_CACHE_KEY = 'raja_store_cached_products'
+const CACHE_TTL_MS = 5 * 60 * 1000 // 5 minutes TTL
+
+interface CacheEnvelope {
+  timestamp: number
+  data: Product[]
+}
+
+function getSessionCachedData(): { products: Product[]; timestamp: number } {
+  try {
+    const raw = sessionStorage.getItem(SESSION_CACHE_KEY)
+    if (raw) {
+      const parsed = JSON.parse(raw)
+      // Check if wrapped in envelope
+      if (parsed && typeof parsed === 'object' && Array.isArray(parsed.data) && typeof parsed.timestamp === 'number') {
+        return { products: parsed.data, timestamp: parsed.timestamp }
+      }
+      // Backward compatibility if previously stored as raw array
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return { products: parsed, timestamp: 0 } // treat as stale immediately so it revalidates
+      }
+    }
+  } catch {
+    /* ignore storage errors */
+  }
+  return { products: [], timestamp: 0 }
+}
+
+const initialCache = getSessionCachedData()
+let cachedProducts: Product[] = initialCache.products
+let cacheTimestamp: number = initialCache.timestamp
+let catalogFetchPromise: Promise<Product[]> | null = null
+let catalogStatus: CatalogStatus = cachedProducts.length > 0 ? 'success' : 'idle'
+
+function isCacheStale(): boolean {
+  if (cachedProducts.length === 0) return true
+  return Date.now() - cacheTimestamp > CACHE_TTL_MS
+}
+
+// Broadcast to all useCatalog subscribers when global state changes
+const catalogListeners = new Set<() => void>()
+function notifyCatalogListeners() {
+  catalogListeners.forEach((fn) => fn())
+}
+
+function fetchCatalog(options?: { force?: boolean }): Promise<Product[]> {
+  // If an in-flight request already exists, return it to prevent duplicate network calls
+  if (catalogFetchPromise) {
+    return catalogFetchPromise
+  }
+
+  const stale = isCacheStale()
+
+  // If cache is fresh and force is false, return cached products immediately
+  if (!stale && !options?.force) {
+    return Promise.resolve(cachedProducts)
+  }
+
+  // Only set global status to 'loading' if we don't have any cached products to display.
+  // When cached products already exist, keep catalogStatus as 'success' so the UI displays existing data seamlessly.
+  if (cachedProducts.length === 0) {
+    catalogStatus = 'loading'
+    notifyCatalogListeners()
+  }
+
+  catalogFetchPromise = getProducts()
+    .then((res) => {
+      cachedProducts = res
+      cacheTimestamp = Date.now()
+      try {
+        const envelope: CacheEnvelope = {
+          timestamp: cacheTimestamp,
+          data: res,
+        }
+        sessionStorage.setItem(SESSION_CACHE_KEY, JSON.stringify(envelope))
+      } catch {
+        /* ignore storage errors */
+      }
+      catalogFetchPromise = null
+      catalogStatus = 'success'
+      notifyCatalogListeners()
+      return res
+    })
+    .catch((err) => {
+      catalogFetchPromise = null
+      // Only set status to 'error' if we have no cached products to show
+      if (cachedProducts.length === 0) {
+        catalogStatus = 'error'
+      } else {
+        // If we have cached products, keep them visible and graceful
+        console.warn('Background refresh of catalog failed, continuing with cached data.', err)
+      }
+      notifyCatalogListeners()
+      throw err
+    })
+
   return catalogFetchPromise
 }
 
-function useCatalog() {
+interface CatalogState {
+  products: Product[]
+  loading: boolean
+  error: boolean
+  retry: () => void
+}
+
+function useCatalog(): CatalogState {
   const [products, setProducts] = useState<Product[]>(() => cachedProducts)
+  const [status, setStatus] = useState<CatalogStatus>(() => catalogStatus)
+
   useEffect(() => {
     let isMounted = true
-    const refresh = (force = false) => {
-      if (force) {
-        cachedProducts = []
-        catalogFetchPromise = null
-      }
-      void getCachedProducts().then((data) => {
-        if (isMounted) setProducts(data)
+
+    // Sync with global state changes (including background updates from other subscribers)
+    const sync = () => {
+      if (!isMounted) return
+      setProducts([...cachedProducts])
+      setStatus(catalogStatus)
+    }
+    catalogListeners.add(sync)
+
+    // Initial load / stale check:
+    // 1. If cache is empty and not loading, fetch immediately (user sees skeletons)
+    // 2. If cache has products but is stale and no request is in-flight, revalidate in background (user sees cached products)
+    if (cachedProducts.length === 0 && catalogStatus !== 'loading') {
+      void fetchCatalog().catch(() => {
+        if (isMounted && cachedProducts.length === 0) setStatus('error')
+      })
+    } else if (isCacheStale() && !catalogFetchPromise) {
+      void fetchCatalog().catch(() => {
+        // Handled inside fetchCatalog (gracefully retains cached products)
       })
     }
-    if (cachedProducts.length === 0) {
-      refresh()
+
+    // When the tab regains visibility, refresh if the cache has expired
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible' && isCacheStale() && !catalogFetchPromise) {
+        void fetchCatalog().catch(() => {
+          /* background revalidation failure handled gracefully */
+        })
+      }
     }
-    const handleInvalidate = () => refresh(true)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    const handleInvalidate = () => {
+      cachedProducts = []
+      cacheTimestamp = 0
+      try {
+        sessionStorage.removeItem(SESSION_CACHE_KEY)
+      } catch {
+        /* ignore storage errors */
+      }
+      catalogFetchPromise = null
+      catalogStatus = 'idle'
+      if (isMounted) setProducts([])
+      void fetchCatalog({ force: true })
+        .then((data) => {
+          if (isMounted) {
+            setProducts(data)
+            setStatus('success')
+          }
+        })
+        .catch(() => {
+          if (isMounted && cachedProducts.length === 0) setStatus('error')
+        })
+    }
     window.addEventListener('raja-store-products-invalidated', handleInvalidate)
+
     return () => {
       isMounted = false
+      catalogListeners.delete(sync)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       window.removeEventListener('raja-store-products-invalidated', handleInvalidate)
     }
-  }, [])
-  return products
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const retry = () => {
+    cachedProducts = []
+    cacheTimestamp = 0
+    try {
+      sessionStorage.removeItem(SESSION_CACHE_KEY)
+    } catch {
+      /* ignore storage errors */
+    }
+    catalogFetchPromise = null
+    catalogStatus = 'idle'
+    setProducts([])
+    setStatus('loading')
+    void fetchCatalog({ force: true })
+      .then((data) => {
+        setProducts(data)
+        setStatus('success')
+      })
+      .catch(() => {
+        setStatus('error')
+      })
+  }
+
+  return {
+    products,
+    loading: status === 'loading' || status === 'idle',
+    error: status === 'error',
+    retry,
+  }
 }
 
 /* ==========================================================================
@@ -675,7 +843,7 @@ function SiteHeader() {
   const { theme, toggleTheme } = useTheme()
   const [drawerOpen, setDrawerOpen] = useState(false)
   const [searchVal, setSearchVal] = useState('')
-  const products = useCatalog()
+  const { products } = useCatalog()
   const count = getCartItemCount()
 
   // Sync search input with URL search param when on /products
@@ -998,6 +1166,51 @@ function Layout({ children }: { children: React.ReactNode }) {
 }
 
 /* ==========================================================================
+   PRODUCT CARD SKELETON (REUSABLE)
+   ========================================================================== */
+function ProductCardSkeleton({ variant = 'grid' }: { variant?: 'grid' | 'carousel' }) {
+  return (
+    <article
+      className={`product-card product-card-skeleton${variant === 'carousel' ? ' product-card-skeleton--carousel' : ''}`}
+      aria-hidden="true"
+    >
+      {/* Image area */}
+      <div className="product-card-skeleton__media skeleton-shimmer" />
+      {/* Body */}
+      <div className="product-card-skeleton__body">
+        <div className="skeleton-shimmer product-card-skeleton__line product-card-skeleton__line--sm" />
+        <div className="skeleton-shimmer product-card-skeleton__line product-card-skeleton__line--title" />
+        <div className="skeleton-shimmer product-card-skeleton__line product-card-skeleton__line--title product-card-skeleton__line--title-short" />
+        <div className="skeleton-shimmer product-card-skeleton__line product-card-skeleton__line--rating" />
+        <div className="skeleton-shimmer product-card-skeleton__line product-card-skeleton__line--price" />
+        <div className="skeleton-shimmer product-card-skeleton__btn" />
+      </div>
+    </article>
+  )
+}
+
+/* Skeleton for a full Flipkart-style horizontal carousel section */
+function FlipkartRowSkeleton({ count = 5 }: { count?: number }) {
+  return (
+    <section className="product-showcase-section flipkart-showcase-section skeleton-section" aria-hidden="true">
+      <div className="showcase-header">
+        <div className="showcase-title-area">
+          <div className="skeleton-shimmer skeleton-heading" />
+          <div className="skeleton-shimmer skeleton-subheading" />
+        </div>
+      </div>
+      <div className="carousel-scroll-wrapper">
+        <div className="flipkart-product-carousel">
+          {Array.from({ length: count }, (_, i) => (
+            <ProductCardSkeleton key={i} variant="carousel" />
+          ))}
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/* ==========================================================================
    PRODUCT CARD (NO HEART / LIKE BUTTON)
    ========================================================================== */
 function ProductCard({
@@ -1158,9 +1371,19 @@ function FlipkartProductRow({
    HOMEPAGE (COMPACT HERO, DYNAMIC CATEGORIES & FLIPKART-STYLE ROWS)
    ========================================================================== */
 function HomePage() {
-  const products = useCatalog()
+  const { products, loading, error, retry } = useCatalog()
   const { addToCart } = useCart()
   const navigate = useNavigate()
+  const [showSlowHint, setShowSlowHint] = useState(false)
+
+  useEffect(() => {
+    if (!loading) {
+      setShowSlowHint(false)
+      return
+    }
+    const timer = window.setTimeout(() => setShowSlowHint(true), 5000)
+    return () => window.clearTimeout(timer)
+  }, [loading])
 
   function handleAdd(product: Product) {
     addToCart(product)
@@ -1320,8 +1543,19 @@ function HomePage() {
         {/* Animated Promo Banner — replaces static hero photo */}
         <PromoBanner />
 
-        {/* Category Quick Access Bar */}
-        {categories.length > 0 && (
+        {/* Category Quick Access Bar — show skeleton chips while loading */}
+        {loading ? (
+          <div className="category-quick-bar" aria-hidden="true">
+            <div className="quick-bar-heading">
+              <div className="skeleton-shimmer skeleton-heading" style={{ width: 160 }} />
+            </div>
+            <div className="category-chips-row">
+              {[90, 110, 80, 100, 95].map((w, i) => (
+                <div key={i} className="skeleton-shimmer" style={{ width: w, height: 34, borderRadius: 'var(--radius-full)' }} />
+              ))}
+            </div>
+          </div>
+        ) : categories.length > 0 ? (
           <ScrollRevealSection>
             <section className="category-quick-bar" aria-label="Browse by category">
               <div className="quick-bar-heading">
@@ -1354,21 +1588,49 @@ function HomePage() {
               </div>
             </section>
           </ScrollRevealSection>
-        )}
+        ) : null}
 
-        {/* Product Horizontal Rows with Scroll Reveal */}
-        {homeSections.map((section) => (
-          <ScrollRevealSection key={section.id}>
-            <FlipkartProductRow
-              title={section.title}
-              subtitle={section.subtitle}
-              viewAllLink={section.viewAllLink}
-              products={section.products}
-              onAdd={handleAdd}
-              onOpen={(slug) => navigate(`/product/${slug}`)}
-            />
-          </ScrollRevealSection>
-        ))}
+        {/* Product Horizontal Rows — error retry, skeleton while loading, real rows when ready */}
+        {error ? (
+          <div className="state-box catalog-error-state" style={{ margin: '40px auto' }}>
+            <div className="catalog-error-icon" aria-hidden="true">⚠️</div>
+            <h3>Unable to load products.</h3>
+            <p>Please check your connection and try again.</p>
+            <button
+              className="catalog-retry-btn"
+              onClick={retry}
+              aria-label="Retry loading products"
+            >
+              <RotateCcw size={15} />
+              Try Again
+            </button>
+          </div>
+        ) : loading ? (
+          <>
+            {showSlowHint && (
+              <div className="slow-load-banner" role="status" aria-live="polite">
+                <span className="slow-load-spinner" aria-hidden="true" />
+                <span>Waking up server, this may take a few seconds on first visit...</span>
+              </div>
+            )}
+            <FlipkartRowSkeleton count={5} />
+            <FlipkartRowSkeleton count={5} />
+            <FlipkartRowSkeleton count={5} />
+          </>
+        ) : (
+          homeSections.map((section) => (
+            <ScrollRevealSection key={section.id} className="catalog-products-reveal">
+              <FlipkartProductRow
+                title={section.title}
+                subtitle={section.subtitle}
+                viewAllLink={section.viewAllLink}
+                products={section.products}
+                onAdd={handleAdd}
+                onOpen={(slug) => navigate(`/product/${slug}`)}
+              />
+            </ScrollRevealSection>
+          ))
+        )}
 
         {/* Trust / Value Strip */}
         <ScrollRevealSection>
@@ -1423,13 +1685,25 @@ function HomePage() {
    SHOP / CATALOG PAGE (NO LARGE HERO BANNER)
    ========================================================================== */
 function ProductsPage() {
-  const products = useCatalog()
+  const { products, loading, error, retry } = useCatalog()
   const { addToCart } = useCart()
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const activeCategory = searchParams.get('category') ?? 'all'
   const searchQuery = searchParams.get('search') ?? ''
   const [sort, setSort] = useState<SortOption>('featured')
+  // Slow-backend hint: show message after 5s of loading
+  const [showSlowHint, setShowSlowHint] = useState(false)
+
+  // Start/stop the slow-backend hint timer
+  useEffect(() => {
+    if (!loading) {
+      setShowSlowHint(false)
+      return
+    }
+    const timer = window.setTimeout(() => setShowSlowHint(true), 5000)
+    return () => window.clearTimeout(timer)
+  }, [loading])
 
   const categories = useMemo(() => getProductCategories(products), [products])
 
@@ -1515,6 +1789,9 @@ function ProductsPage() {
     setSearchParams(next)
   }
 
+  // Derive how many skeleton cards to show
+  const skeletonCount = 8
+
   return (
     <Layout>
       <div className="shop-page-wrapper">
@@ -1528,7 +1805,7 @@ function ProductsPage() {
               )}
               <h1>{searchQuery ? `Search results for \u201C${searchQuery}\u201D` : (currentCategoryName ? `${currentCategoryName} Collection` : 'Shop Collection')}</h1>
               <span className="catalog-item-count">
-                Showing {visibleProducts.length} {visibleProducts.length === 1 ? 'item' : 'items'}
+                {loading ? 'Loading…' : `Showing ${visibleProducts.length} ${visibleProducts.length === 1 ? 'item' : 'items'}`}
               </span>
             </div>
 
@@ -1570,12 +1847,39 @@ function ProductsPage() {
           </div>
         </div>
 
-        {products.length === 0 ? (
-          <div className="state-box">
-            <h3>Loading Products...</h3>
-            <p>Fetching everyday essentials from Raja Store.</p>
+        {/* Slow-backend hint banner */}
+        {loading && showSlowHint && (
+          <div className="slow-load-banner" role="status" aria-live="polite">
+            <span className="slow-load-spinner" aria-hidden="true" />
+            <span>Waking up server, this may take a few seconds on first visit...</span>
+          </div>
+        )}
+
+        {/* 4-state rendering: loading / error / empty / success */}
+        {loading ? (
+          /* STATE 1: Loading — show skeleton grid */
+          <div className="catalog-product-grid" aria-label="Loading products" aria-busy="true">
+            {Array.from({ length: skeletonCount }, (_, i) => (
+              <ProductCardSkeleton key={i} variant="grid" />
+            ))}
+          </div>
+        ) : error ? (
+          /* STATE 4: Error — show retry UI */
+          <div className="state-box catalog-error-state">
+            <div className="catalog-error-icon" aria-hidden="true">⚠️</div>
+            <h3>Unable to load products.</h3>
+            <p>Please check your connection and try again.</p>
+            <button
+              className="catalog-retry-btn"
+              onClick={retry}
+              aria-label="Retry loading products"
+            >
+              <RotateCcw size={15} />
+              Try Again
+            </button>
           </div>
         ) : visibleProducts.length === 0 ? (
+          /* STATE 3: Success with zero products */
           searchQuery ? (
             <div className="search-no-results-wrap">
               <div className="search-empty-state">
@@ -1639,8 +1943,9 @@ function ProductsPage() {
             </div>
           )
         ) : (
+          /* STATE 2: Success with products */
           <div
-            className="catalog-product-grid"
+            className="catalog-product-grid catalog-products-loaded"
             key={`${searchQuery}-${activeCategory}-${sort}`}
           >
             {visibleProducts.map((product) => (
@@ -1663,7 +1968,7 @@ function ProductsPage() {
    ========================================================================== */
 function ProductPage() {
   const { slug } = useParams()
-  const products = useCatalog()
+  const { products, loading, error, retry } = useCatalog()
   const product = products.find((item) => item.slug === slug)
   const { addToCart } = useCart()
   const navigate = useNavigate()
@@ -1672,6 +1977,16 @@ function ProductPage() {
   const [quantity, setQuantity] = useState(1)
   const [selectedVariant, setSelectedVariant] = useState(product?.variants[0]?.id ?? '')
   const [isAddedFeedback, setIsAddedFeedback] = useState(false)
+  const [showSlowHint, setShowSlowHint] = useState(false)
+
+  useEffect(() => {
+    if (!loading) {
+      setShowSlowHint(false)
+      return
+    }
+    const timer = window.setTimeout(() => setShowSlowHint(true), 5000)
+    return () => window.clearTimeout(timer)
+  }, [loading])
 
   useEffect(() => {
     window.scrollTo(0, 0)
@@ -1682,7 +1997,7 @@ function ProductPage() {
     }
   }, [slug, product])
 
-  const isProductNotFound = products.length > 0 && !product
+  const isProductNotFound = !loading && products.length > 0 && !product
   const primaryImage = product?.images?.[0] ? resolveImageUrl(product.images[0]) : undefined
 
   const jsonLd = useMemo(() => {
@@ -1732,16 +2047,42 @@ function ProductPage() {
     return [...sameCategory, ...otherProducts].slice(0, 6)
   }, [product, products])
 
-  if (products.length > 0 && !product) {
+  if (error && !product) {
     return (
       <Layout>
         <div className="detail-container">
-          <div className="state-box">
-            <h3>Product not found</h3>
-            <p>The piece you are looking for might have moved or is unavailable.</p>
-            <button className="hero-cta-btn" onClick={() => navigate('/products')}>
-              Back to Collection
+          <div className="state-box catalog-error-state" style={{ margin: '40px auto' }}>
+            <div className="catalog-error-icon" aria-hidden="true">⚠️</div>
+            <h3>Unable to load product details.</h3>
+            <p>Please check your connection and try again.</p>
+            <button
+              className="catalog-retry-btn"
+              onClick={retry}
+              aria-label="Retry loading product"
+            >
+              <RotateCcw size={15} />
+              Try Again
             </button>
+          </div>
+        </div>
+      </Layout>
+    )
+  }
+
+  if (loading && !product) {
+    return (
+      <Layout>
+        <div className="detail-container">
+          {showSlowHint && (
+            <div className="slow-load-banner" role="status" aria-live="polite" style={{ maxWidth: 520, margin: '20px auto 16px' }}>
+              <span className="slow-load-spinner" aria-hidden="true" />
+              <span>Waking up server, this may take a few seconds on first visit...</span>
+            </div>
+          )}
+          <div className="state-box">
+            <span className="slow-load-spinner" style={{ width: 28, height: 28, borderWidth: 3, margin: '0 auto 12px' }} />
+            <h3>Loading details...</h3>
+            <p>Fetching everyday essentials from Raja Store.</p>
           </div>
         </div>
       </Layout>
@@ -1753,7 +2094,11 @@ function ProductPage() {
       <Layout>
         <div className="detail-container">
           <div className="state-box">
-            <h3>Loading details...</h3>
+            <h3>Product not found</h3>
+            <p>The piece you are looking for might have moved or is unavailable.</p>
+            <button className="hero-cta-btn" onClick={() => navigate('/products')}>
+              Back to Collection
+            </button>
           </div>
         </div>
       </Layout>

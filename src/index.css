@@ -4699,3 +4699,244 @@ img {
   }
 }
 
+/* ==========================================================================
+   SKELETON LOADER SYSTEM
+   ========================================================================== */
+
+/* ── Shimmer keyframe ─────────────────────────────────────────────────────── */
+@keyframes skeleton-shimmer {
+  0% { background-position: -468px 0; }
+  100% { background-position: 468px 0; }
+}
+
+.skeleton-shimmer {
+  background: linear-gradient(
+    90deg,
+    var(--bg-subtle) 25%,
+    var(--bg-surface) 50%,
+    var(--bg-subtle) 75%
+  );
+  background-size: 936px 100%;
+  animation: skeleton-shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--radius-sm);
+}
+
+/* ── ProductCardSkeleton — grid variant ───────────────────────────────────── */
+.product-card-skeleton {
+  pointer-events: none;
+  user-select: none;
+  overflow: hidden;
+}
+
+.product-card-skeleton .product-card-skeleton__media {
+  width: 100%;
+  aspect-ratio: 1 / 1.05;
+  border-radius: 0;
+  flex-shrink: 0;
+}
+
+.product-card-skeleton__body {
+  padding: 12px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  gap: 8px;
+}
+
+.product-card-skeleton__line {
+  height: 12px;
+  border-radius: var(--radius-sm);
+}
+
+.product-card-skeleton__line--sm {
+  width: 55%;
+  height: 10px;
+}
+
+.product-card-skeleton__line--title {
+  width: 90%;
+  height: 13px;
+}
+
+.product-card-skeleton__line--title-short {
+  width: 70%;
+}
+
+.product-card-skeleton__line--rating {
+  width: 38%;
+  height: 18px;
+  border-radius: var(--radius-sm);
+}
+
+.product-card-skeleton__line--price {
+  width: 48%;
+  height: 16px;
+  margin-top: auto;
+}
+
+.product-card-skeleton__btn {
+  width: 100%;
+  height: 40px;
+  border-radius: var(--radius-md);
+  margin-top: 4px;
+}
+
+/* ── ProductCardSkeleton — carousel variant ───────────────────────────────── */
+.product-card-skeleton--carousel {
+  flex: 0 0 195px;
+  min-width: 195px;
+  max-width: 195px;
+}
+
+.product-card-skeleton--carousel .product-card-skeleton__media {
+  aspect-ratio: 1 / 1;
+}
+
+.product-card-skeleton--carousel .product-card-skeleton__body {
+  padding: 10px 12px 12px;
+}
+
+@media (max-width: 768px) {
+  .product-card-skeleton--carousel {
+    flex: 0 0 155px;
+    min-width: 155px;
+    max-width: 155px;
+  }
+}
+
+/* ── FlipkartRowSkeleton heading lines ────────────────────────────────────── */
+.skeleton-heading {
+  height: 22px;
+  width: 180px;
+  max-width: 60%;
+  border-radius: var(--radius-sm);
+}
+
+.skeleton-subheading {
+  height: 13px;
+  width: 260px;
+  max-width: 80%;
+  margin-top: 6px;
+  border-radius: var(--radius-sm);
+}
+
+/* ── Skeleton section placeholder (no border override needed) ─────────────── */
+.skeleton-section {
+  /* Inherit flipkart-showcase-section styles */
+}
+
+/* ── Catalog grid: fade-in when products arrive ───────────────────────────── */
+@keyframes catalog-fade-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.catalog-products-loaded {
+  animation: catalog-fade-in 0.35s ease both;
+}
+
+/* ── Homepage sections: fade-in wrapper ───────────────────────────────────── */
+.catalog-products-reveal {
+  animation: catalog-fade-in 0.4s ease both;
+}
+
+/* ── Slow-backend loading banner ──────────────────────────────────────────── */
+.slow-load-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--color-primary-light, #fff2ec);
+  border: 1px solid rgba(224, 90, 43, 0.25);
+  border-radius: var(--radius-md);
+  padding: 12px 16px;
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--color-primary-dark, #8a2d0e);
+  margin-bottom: 18px;
+  animation: catalog-fade-in 0.3s ease both;
+}
+
+[data-theme='dark'] .slow-load-banner {
+  background: rgba(224, 90, 43, 0.12);
+  border-color: rgba(224, 90, 43, 0.3);
+  color: #f3a07a;
+}
+
+.slow-load-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(224, 90, 43, 0.3);
+  border-top-color: var(--color-primary);
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+  flex-shrink: 0;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Catalog error state ──────────────────────────────────────────────────── */
+.catalog-error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+.catalog-error-icon {
+  font-size: 36px;
+  line-height: 1;
+  margin-bottom: 4px;
+}
+
+.catalog-retry-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  background: var(--color-primary);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 10px 22px;
+  font-size: 13.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  margin-top: 8px;
+}
+
+.catalog-retry-btn:hover {
+  background: var(--color-primary-hover);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 14px rgba(224, 90, 43, 0.3);
+}
+
+.catalog-retry-btn:active {
+  transform: scale(0.97);
+  box-shadow: none;
+}
+
+/* ── Skeleton: respect reduced motion ─────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  .skeleton-shimmer {
+    animation: none;
+    background: var(--bg-subtle);
+  }
+  .slow-load-spinner {
+    animation: none;
+  }
+  .catalog-products-loaded,
+  .catalog-products-reveal {
+    animation: none;
+  }
+}
+
+/* ── Mobile safety: no horizontal overflow from skeletons ─────────────────── */
+@media (max-width: 768px) {
+  .slow-load-banner {
+    font-size: 13px;
+    padding: 10px 14px;
+  }
+}
