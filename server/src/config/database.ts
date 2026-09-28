@@ -5,16 +5,32 @@ let connected = false
 
 export async function connectDatabase() {
   if (!env.DATABASE_URL) {
-    if (env.NODE_ENV === 'production' || env.PERSISTENCE_MODE === 'mongo') throw new Error('DATABASE_URL is required for MongoDB persistence')
+    if (env.NODE_ENV === 'production' || env.PERSISTENCE_MODE === 'mongo') {
+      throw new Error('DATABASE_URL is required for MongoDB persistence')
+    }
     return false
   }
+
   try {
-    await mongoose.connect(env.DATABASE_URL, { serverSelectionTimeoutMS: 5000 })
+    await mongoose.connect(env.DATABASE_URL, {
+      serverSelectionTimeoutMS: 10000,
+    })
+
     connected = true
+    console.log('MongoDB connected successfully')
     return true
-  } catch {
-    console.error('MongoDB connection failed')
-    if (env.NODE_ENV === 'production' || env.PERSISTENCE_MODE === 'mongo') throw new Error('Database connection failed')
+  } catch (error) {
+    connected = false
+
+    console.error(
+      'MongoDB connection failed:',
+      error instanceof Error ? error.message : error,
+    )
+
+    if (env.NODE_ENV === 'production' || env.PERSISTENCE_MODE === 'mongo') {
+      throw new Error('Database connection failed')
+    }
+
     return false
   }
 }
@@ -24,6 +40,9 @@ export function isDatabaseConnected() {
 }
 
 export async function disconnectDatabase() {
-  if (connected) await mongoose.disconnect()
+  if (connected) {
+    await mongoose.disconnect()
+  }
+
   connected = false
 }
